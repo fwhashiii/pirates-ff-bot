@@ -12,3 +12,4 @@ youtube-transcript-api==0.6.2
 deep-translator==1.11.4
 langdetect==1.0.9
 yt-dlp==2024.3.10
+audioop-lts==0.2.2; python_version >= "3.13"
