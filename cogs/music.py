@@ -14,7 +14,8 @@ from datetime import datetime
 
 log = logging.getLogger("cog.music")
 
-FFMPEG_PATH = r"C:\Users\fwhas\ffmpeg\ffmpeg.exe"
+import os as _os_module
+FFMPEG_PATH = _os_module.environ.get("FFMPEG_PATH", "ffmpeg")  # Railway uses system ffmpeg
 
 FFMPEG_OPTIONS = {
     "executable": FFMPEG_PATH,
@@ -30,11 +31,12 @@ def is_spotify(query: str) -> bool:
 def search_youtube(query: str) -> dict | None:
     """Stream audio directly from YouTube."""
     import os as _os
-    # Ensure Node.js is in PATH for yt-dlp JS runtime
+    # Add Node.js to PATH if on Windows
     node_path = r"C:\Program Files\nodejs"
-    env_path = _os.environ.get("PATH", "")
-    if node_path not in env_path:
-        _os.environ["PATH"] = node_path + ";" + env_path
+    if _os.path.exists(node_path):
+        env_path = _os.environ.get("PATH", "")
+        if node_path not in env_path:
+            _os.environ["PATH"] = node_path + ";" + env_path
 
     opts = {
         "format":         "bestaudio/best",
