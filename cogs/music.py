@@ -309,6 +309,45 @@ class MusicCog(commands.Cog, name="Music"):
             f"🔁 Loop **{'enabled' if state.loop else 'disabled'}**."
         )
 
+    # ── /musicstatus ──────────────────────────────────────
+    @app_commands.command(name="musicstatus", description="Check the music bot's status 🎵")
+    async def slash_musicstatus(self, interaction: discord.Interaction):
+        import psutil, platform, time
+        bot = interaction.client
+
+        latency = round(bot.latency * 1000)
+        latency_color = 0x00FF7F if latency < 100 else 0xFFD700 if latency < 200 else 0xFF4500
+
+        process = psutil.Process()
+        uptime_seconds = int(time.time() - process.create_time())
+        hours, remainder = divmod(uptime_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        uptime_str = f"{hours}h {minutes}m {seconds}s"
+
+        mem_mb = round(process.memory_info().rss / 1024 / 1024, 1)
+        cpu = psutil.cpu_percent(interval=0.1)
+
+        state = get_state(interaction.guild.id)
+        vc = interaction.guild.voice_client
+
+        embed = discord.Embed(
+            title="🎵 Music Bot Status",
+            color=latency_color,
+            timestamp=datetime.utcnow(),
+        )
+        embed.set_thumbnail(url=bot.user.display_avatar.url)
+        embed.add_field(name="🏓 Latency",      value=f"{latency}ms",                          inline=True)
+        embed.add_field(name="⏱️ Uptime",        value=uptime_str,                              inline=True)
+        embed.add_field(name="💾 Memory",        value=f"{mem_mb} MB",                          inline=True)
+        embed.add_field(name="🖥️ CPU",           value=f"{cpu}%",                               inline=True)
+        embed.add_field(name="🎵 Now Playing",   value=state.current["title"][:40] if state.current else "Nothing", inline=True)
+        embed.add_field(name="📋 Queue",         value=f"{len(state.queue)} songs",             inline=True)
+        embed.add_field(name="🔊 Voice",         value=vc.channel.name if vc else "Not connected", inline=True)
+        embed.add_field(name="🔁 Loop",          value="On" if state.loop else "Off",           inline=True)
+        embed.add_field(name="🐍 Python",        value=platform.python_version(),               inline=True)
+        embed.set_footer(text=f"Music Bot ID: {bot.user.id}")
+        await interaction.response.send_message(embed=embed)
+
 
 async def setup(bot: commands.Bot):
     await bot.add_cog(MusicCog(bot))
