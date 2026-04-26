@@ -5,7 +5,7 @@
 import discord
 from discord.ext import commands
 from discord import app_commands
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 COMMANDS_INFO = {
@@ -96,7 +96,48 @@ class HelpCog(commands.Cog, name="Help"):
         )
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
-    @app_commands.command(name="ping", description="Check bot latency 🏓")
+    # ── /botstatus ────────────────────────────────────────
+    @app_commands.command(name="botstatus", description="Check the bot's current status 🤖")
+    async def slash_botstatus(self, interaction: discord.Interaction):
+        import psutil, platform, time
+        bot = interaction.client
+        guild = interaction.guild
+
+        # Latency
+        latency = round(bot.latency * 1000)
+        latency_color = 0x00FF7F if latency < 100 else 0xFFD700 if latency < 200 else 0xFF4500
+
+        # Uptime
+        process = psutil.Process()
+        uptime_seconds = int(time.time() - process.create_time())
+        hours, remainder = divmod(uptime_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        uptime_str = f"{hours}h {minutes}m {seconds}s"
+
+        # Memory
+        mem = process.memory_info()
+        mem_mb = round(mem.rss / 1024 / 1024, 1)
+
+        # CPU
+        cpu = psutil.cpu_percent(interval=0.1)
+
+        embed = discord.Embed(
+            title="🤖 Bot Status",
+            color=latency_color,
+            timestamp=datetime.utcnow(),
+        )
+        embed.set_thumbnail(url=bot.user.display_avatar.url)
+        embed.add_field(name="🏓 Latency",      value=f"{latency}ms",          inline=True)
+        embed.add_field(name="⏱️ Uptime",        value=uptime_str,              inline=True)
+        embed.add_field(name="💾 Memory",        value=f"{mem_mb} MB",          inline=True)
+        embed.add_field(name="🖥️ CPU",           value=f"{cpu}%",               inline=True)
+        embed.add_field(name="📡 Servers",       value=str(len(bot.guilds)),    inline=True)
+        embed.add_field(name="👥 Members",       value=str(guild.member_count), inline=True)
+        embed.add_field(name="🔧 Cogs Loaded",   value=str(len(bot.cogs)),      inline=True)
+        embed.add_field(name="⚡ Commands",      value=str(len(bot.tree.get_commands())), inline=True)
+        embed.add_field(name="🐍 Python",        value=platform.python_version(), inline=True)
+        embed.set_footer(text=f"Bot ID: {bot.user.id}")
+        await interaction.response.send_message(embed=embed)
     async def slash_ping(self, interaction: discord.Interaction):
         latency = round(self.bot.latency * 1000)
         color = 0x00FF7F if latency < 100 else 0xFFD700 if latency < 200 else 0xFF4500
