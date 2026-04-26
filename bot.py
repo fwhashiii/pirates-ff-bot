@@ -133,6 +133,44 @@ async def on_app_command_error(interaction: discord.Interaction, error: discord.
         pass
 
 
+async def log_command_usage(interaction: discord.Interaction):
+    """Log every slash command use to #⚙️│BOT-LOG."""
+    try:
+        log_ch_id = int(os.getenv("LOG_CHANNEL_ID", 0))
+        if not log_ch_id:
+            return
+        channel = bot.get_channel(log_ch_id)
+        if not channel:
+            return
+        cmd_name = interaction.command.name if interaction.command else "unknown"
+        options = ""
+        if interaction.data and interaction.data.get("options"):
+            opts = interaction.data["options"]
+            options = " ".join(f"`{o['name']}:{o.get('value','')}`" for o in opts[:5])
+        embed = discord.Embed(
+            description=(
+                f"**/{cmd_name}** {options}\n"
+                f"👤 {interaction.user.mention} (`{interaction.user}`)\n"
+                f"📍 {interaction.channel.mention if interaction.channel else 'DM'}"
+            ),
+            color=0x00BFFF,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.set_author(
+            name=f"{interaction.user.display_name} used /{cmd_name}",
+            icon_url=interaction.user.display_avatar.url,
+        )
+        await channel.send(embed=embed)
+    except Exception as e:
+        log.debug(f"Command log error: {e}")
+
+
+@bot.tree.interaction_check
+async def global_interaction_check(interaction: discord.Interaction) -> bool:
+    asyncio.create_task(log_command_usage(interaction))
+    return True
+
+
 # ── Load Cogs ─────────────────────────────────────────────
 async def load_cogs():
     failed = []
