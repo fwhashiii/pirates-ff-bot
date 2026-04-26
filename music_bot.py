@@ -1,0 +1,66 @@
+"""
+🎵 PIRATES Music Bot — Standalone
+Run separately from the main bot: python music_bot.py
+"""
+
+import discord
+from discord.ext import commands
+import asyncio
+import os
+import logging
+from dotenv import load_dotenv
+
+load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+log = logging.getLogger("MusicBot")
+
+intents = discord.Intents.default()
+intents.message_content = True
+intents.voice_states = True
+
+bot = commands.Bot(
+    command_prefix="m!",
+    intents=intents,
+    help_command=None,
+)
+
+@bot.event
+async def on_ready():
+    log.info(f"Music Bot logged in as {bot.user} (ID: {bot.user.id})")
+    await bot.change_presence(
+        activity=discord.Activity(
+            type=discord.ActivityType.listening,
+            name="music 🎵 | /play",
+        )
+    )
+    try:
+        guild_id = int(os.getenv("GUILD_ID", 0))
+        if guild_id:
+            guild = discord.Object(id=guild_id)
+            bot.tree.copy_global_to(guild=guild)
+            synced = await bot.tree.sync(guild=guild)
+            log.info(f"Synced {len(synced)} music commands to guild instantly.")
+        else:
+            synced = await bot.tree.sync()
+            log.info(f"Synced {len(synced)} music commands globally.")
+    except Exception as e:
+        log.error(f"Sync failed: {e}")
+
+
+async def main():
+    async with bot:
+        await bot.load_extension("cogs.music")
+        token = os.getenv("MUSIC_BOT_TOKEN")
+        if not token or token == "your_music_bot_token_here":
+            print("❌ MUSIC_BOT_TOKEN not set in .env")
+            print("   Add your music bot token to .env as MUSIC_BOT_TOKEN=")
+            return
+        await bot.start(token)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
