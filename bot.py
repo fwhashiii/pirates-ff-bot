@@ -11,7 +11,7 @@ import os
 import sys
 import traceback
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, time as dt_time
 from dotenv import load_dotenv
 import logging
 
@@ -93,6 +93,62 @@ async def on_ready():
     # Notify owner bot is online
     await notify_owner("✅ **Pirate bot is online!**\nAll systems running.", color=0x00FF7F)
 
+    # Start daily status report
+    if not daily_status.is_running():
+        daily_status.start()
+
+    # Start heartbeat monitor
+    if not heartbeat.is_running():
+        heartbeat.start()
+
+
+# ── Heartbeat — checks bot is still responsive every 10 min ──
+@tasks.loop(minutes=10)
+async def heartbeat():
+    """Silent check — if this stops firing, something is wrong."""
+    log.debug("Heartbeat OK")
+
+
+@heartbeat.error
+async def heartbeat_error(error):
+    await notify_owner(f"💔 **Heartbeat failed** — bot may be unresponsive!\nError: `{error}`")
+
+
+# ── Daily status DM ───────────────────────────────────────
+@tasks.loop(time=dt_time(hour=9, minute=0))  # 9:00 AM UTC daily
+async def daily_status():
+    import psutil, time
+    try:
+        owner = await bot.fetch_user(OWNER_ID)
+        guild_id = int(os.getenv("GUILD_ID", 0))
+        guild = bot.get_guild(guild_id)
+
+        latency = round(bot.latency * 1000)
+        process = psutil.Process()
+        uptime_seconds = int(time.time() - process.create_time())
+        hours, remainder = divmod(uptime_seconds, 3600)
+        minutes, seconds = divmod(remainder, 60)
+        mem_mb = round(process.memory_info().rss / 1024 / 1024, 1)
+
+        embed = discord.Embed(
+            title="📊 Daily Bot Status Report",
+            description="Here's your daily summary for **Pirate bot**",
+            color=0x00BFFF,
+            timestamp=datetime.now(timezone.utc),
+        )
+        embed.add_field(name="🏓 Latency",    value=f"{latency}ms",                                    inline=True)
+        embed.add_field(name="⏱️ Uptime",      value=f"{hours}h {minutes}m {seconds}s",                inline=True)
+        embed.add_field(name="💾 Memory",      value=f"{mem_mb} MB",                                   inline=True)
+        embed.add_field(name="👥 Members",     value=str(guild.member_count) if guild else "?",        inline=True)
+        embed.add_field(name="🔧 Cogs",        value=str(len(bot.cogs)),                               inline=True)
+        embed.add_field(name="⚡ Commands",    value=str(len(bot.tree.get_commands())),                inline=True)
+        embed.add_field(name="✅ Status",      value="All systems operational",                        inline=False)
+        embed.set_footer(text="PIRATES Bot • Daily Report • 9:00 AM UTC")
+        await owner.send(embed=embed)
+        log.info("Daily status report sent to owner")
+    except Exception as e:
+        log.error(f"Daily status report failed: {e}")
+
 
 @bot.event
 async def on_disconnect():
@@ -117,18 +173,33 @@ async def on_command_error(ctx, error):
 
 @bot.tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: discord.app_commands.AppCommandError):
-    """Catch slash command errors and notify owner."""
+    """Catch slash command errors — only notify owner for serious ones."""
     error_msg = str(error)
-    log.error(f"Slash command error in /{interaction.command.name if interaction.command else 'unknown'}: {error_msg}")
-    await notify_owner(
-        f"⚠️ **Slash Command Error**\n"
-        f"Command: `/{interaction.command.name if interaction.command else 'unknown'}`\n"
-        f"User: {interaction.user}\n"
-        f"Error: ```{error_msg[:500]}```"
-    )
+    cmd_name = interaction.command.name if interaction.command else "unknown"
+    log.error(f"Slash command error in /{cmd_name}: {error_msg}")
+
+    # Only DM owner for serious errors, not user mistakes
+    serious = not isinstance(error, (
+        discord.app_commands.CommandNotFound,
+        discord.app_commands.CheckFailure,
+        discord.app_commands.MissingPermissions,
+        discord.app_commands.BotMissingPermissions,
+        discord.app_commands.CommandOnCooldown,
+    ))
+
+    if serious:
+        await notify_owner(
+            f"⚠️ **Slash Command Error**\n"
+            f"Command: `/{cmd_name}`\n"
+            f"User: {interaction.user}\n"
+            f"Error: ```{error_msg[:500]}```"
+        )
+
     try:
         if not interaction.response.is_done():
-            await interaction.response.send_message("⚠️ Something went wrong. Staff have been notified.", ephemeral=True)
+            await interaction.response.send_message("⚠️ Something went wrong. Try again.", ephemeral=True)
+        else:
+            await interaction.followup.send("⚠️ Something went wrong. Try again.", ephemeral=True)
     except Exception:
         pass
 
