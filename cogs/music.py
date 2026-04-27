@@ -45,6 +45,10 @@ def search_youtube(query: str) -> dict | None:
         "no_warnings":    True,
         "default_search": "ytsearch",
         "source_address": "0.0.0.0",
+        "extractor_args": {"youtube": {"skip": ["hls"]}},
+        "http_headers": {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
         try:
