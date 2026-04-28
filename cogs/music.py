@@ -47,7 +47,6 @@ def search_youtube(query: str) -> dict | None:
         "source_address": "0.0.0.0",
         "extractor_args": {
             "youtube": {
-                "skip": ["hls"],
                 "player_client": ["android", "web"],
             }
         },
@@ -55,6 +54,7 @@ def search_youtube(query: str) -> dict | None:
             "User-Agent": "com.google.android.youtube/17.36.4 (Linux; U; Android 12; GB) gzip",
         },
         "cookiefile": "/root/bot/youtube_cookies.txt" if _os.path.exists("/root/bot/youtube_cookies.txt") else None,
+        "format_sort": ["abr", "asr"],
     }
     with yt_dlp.YoutubeDL(opts) as ydl:
         try:
