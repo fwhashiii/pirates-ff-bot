@@ -258,16 +258,20 @@ class MusicCog(commands.Cog, name="Music"):
             return
 
         try:
-            source = discord.FFmpegPCMAudio(
-                track["url"],
-                executable=FFMPEG_PATH,
-                before_options=(
-                    "-reconnect 1 -reconnect_streamed 1 "
-                    "-reconnect_delay_max 5 -nostdin "
-                    "-timeout 30000000"
-                ),
-                options="-vn -loglevel warning -bufsize 64k",
-            )
+            # Use different options for local files vs streams
+            if track.get("is_file"):
+                source = discord.FFmpegPCMAudio(
+                    track["url"],
+                    executable=FFMPEG_PATH,
+                    options="-vn -loglevel warning",
+                )
+            else:
+                source = discord.FFmpegPCMAudio(
+                    track["url"],
+                    executable=FFMPEG_PATH,
+                    before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin",
+                    options="-vn -loglevel warning",
+                )
             source = discord.PCMVolumeTransformer(source, volume=state.volume)
 
             def after(error):
