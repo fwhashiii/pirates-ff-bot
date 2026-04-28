@@ -214,9 +214,10 @@ class MusicCog(commands.Cog, name="Music"):
                 executable=FFMPEG_PATH,
                 before_options=(
                     "-reconnect 1 -reconnect_streamed 1 "
-                    "-reconnect_delay_max 5 -nostdin"
+                    "-reconnect_delay_max 5 -nostdin "
+                    "-timeout 30000000"
                 ),
-                options="-vn -loglevel error",
+                options="-vn -loglevel warning -bufsize 64k",
             )
             source = discord.PCMVolumeTransformer(source, volume=state.volume)
 
@@ -319,18 +320,22 @@ class MusicCog(commands.Cog, name="Music"):
         state = get_state(guild.id)
         state.queue.append(track)
 
+        # Start playing immediately — don't delay
+        if not vc.is_playing() and not vc.is_paused():
+            self._play_next(guild)
+
+        # Send embed response
         embed = discord.Embed(color=0xFF4500, timestamp=datetime.utcnow())
         if track.get("thumbnail"):
             embed.set_thumbnail(url=track["thumbnail"])
 
-        if vc.is_playing() or vc.is_paused():
+        if len(state.queue) > 0 and (vc.is_playing() or vc.is_paused()):
             embed.title = "➕ Added to Queue"
             embed.description = f"**[{track['title']}]({track['webpage']})**"
             embed.add_field(name="⏱️ Duration", value=fmt_duration(track["duration"]), inline=True)
             embed.add_field(name="📋 Position", value=f"#{len(state.queue)}", inline=True)
             embed.add_field(name="🎵 Source", value=track.get("source", "YouTube"), inline=True)
         else:
-            self._play_next(guild)
             embed.title = "🎵 Now Playing"
             embed.description = f"**[{track['title']}]({track['webpage']})**"
             embed.add_field(name="⏱️ Duration", value=fmt_duration(track["duration"]), inline=True)
