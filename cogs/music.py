@@ -321,12 +321,12 @@ class MusicCog(commands.Cog, name="Music"):
         vc_channel = interaction.user.voice.channel
         guild = interaction.guild
 
-        # ── Step 1: Search FIRST before connecting to voice ──
-        await interaction.followup.send(f"🔍 Searching for **{query}**...")
+        # ── Step 1: Search AND download FIRST before connecting to voice ──
+        await interaction.followup.send(f"🔍 Searching and downloading **{query}**... (15-30 seconds)")
         try:
             track = await asyncio.wait_for(
                 asyncio.get_event_loop().run_in_executor(None, search_youtube, query),
-                timeout=45.0,
+                timeout=120.0,
             )
         except asyncio.TimeoutError:
             await interaction.edit_original_response(content="❌ Search timed out. Try again.")
@@ -351,7 +351,7 @@ class MusicCog(commands.Cog, name="Music"):
                 pass
             return
 
-        # ── Step 2: Connect to voice AFTER finding the song ──
+        # ── Step 2: Connect to voice AFTER download is complete ──
         vc = guild.voice_client
         try:
             if guild.voice_client:
