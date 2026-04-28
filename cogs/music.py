@@ -24,70 +24,87 @@ _COOKIE_PATHS = [
 ]
 COOKIE_FILE = next((p for p in _COOKIE_PATHS if os.path.exists(p)), None)
 
-# ── yt-dlp options — tries multiple strategies ────────────
-def _make_ydl_opts(use_cookies: bool = True) -> dict:
-    opts = {
-        "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
+# ── yt-dlp strategies — no cookies needed ────────────────
+_STRATEGIES = [
+    # 1. mweb client — lightweight mobile web, least bot-detection
+    {
+        "format": "bestaudio/best",
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
         "default_search": "ytsearch",
         "source_address": "0.0.0.0",
-        # tv_embedded client bypasses bot-detection without needing PO tokens
         "extractor_args": {
             "youtube": {
-                "player_client": ["tv_embedded", "android", "web"],
-                "player_skip": ["webpage", "configs"],
+                "player_client": ["mweb"],
             }
-        },
-        "http_headers": {
-            "User-Agent": (
-                "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version"
-            ),
         },
         "socket_timeout": 30,
         "retries": 3,
-        "fragment_retries": 3,
-    }
-    if use_cookies and COOKIE_FILE:
-        opts["cookiefile"] = COOKIE_FILE
-        log.info(f"Using cookies from: {COOKIE_FILE}")
-    return opts
+    },
+    # 2. tv_embedded — TV client, bypasses most bot checks
+    {
+        "format": "bestaudio/best",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "default_search": "ytsearch",
+        "source_address": "0.0.0.0",
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["tv_embedded"],
+                "player_skip": ["webpage", "configs"],
+            }
+        },
+        "socket_timeout": 30,
+        "retries": 3,
+    },
+    # 3. android — mobile app client
+    {
+        "format": "bestaudio/best",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "default_search": "ytsearch",
+        "source_address": "0.0.0.0",
+        "extractor_args": {
+            "youtube": {"player_client": ["android"]}
+        },
+        "http_headers": {
+            "User-Agent": "com.google.android.youtube/17.36.4 (Linux; U; Android 12; GB) gzip",
+        },
+        "socket_timeout": 30,
+        "retries": 3,
+    },
+    # 4. ios — Apple client, different bot-detection path
+    {
+        "format": "bestaudio/best",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "default_search": "ytsearch",
+        "source_address": "0.0.0.0",
+        "extractor_args": {
+            "youtube": {"player_client": ["ios"]}
+        },
+        "socket_timeout": 30,
+        "retries": 3,
+    },
+]
+
+# Add cookies to all strategies if available
+for _s in _STRATEGIES:
+    if COOKIE_FILE:
+        _s["cookiefile"] = COOKIE_FILE
 
 
 def search_youtube(query: str) -> dict | None:
-    """
-    Try to get a streamable audio URL from YouTube.
-    Strategy order:
-      1. tv_embedded client + cookies (if available)
-      2. tv_embedded client without cookies
-      3. android client only
-    """
+    """Try multiple yt-dlp strategies to get a streamable audio URL."""
     if not query.startswith("http"):
         query = f"ytsearch1:{query}"
 
-    strategies = [
-        _make_ydl_opts(use_cookies=True),
-        _make_ydl_opts(use_cookies=False),
-        # Fallback: android only, no extras
-        {
-            "format": "bestaudio/best",
-            "noplaylist": True,
-            "quiet": True,
-            "no_warnings": True,
-            "default_search": "ytsearch",
-            "source_address": "0.0.0.0",
-            "extractor_args": {
-                "youtube": {"player_client": ["android"]}
-            },
-            "http_headers": {
-                "User-Agent": "com.google.android.youtube/17.36.4 (Linux; U; Android 12; GB) gzip",
-            },
-        },
-    ]
-
     last_error = None
-    for i, opts in enumerate(strategies):
+    for i, opts in enumerate(_STRATEGIES):
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(query, download=False)
@@ -99,9 +116,9 @@ def search_youtube(query: str) -> dict | None:
                         continue
                     info = entries[0]
 
+                # Get best audio URL
                 url = info.get("url")
                 if not url:
-                    # Try to get from formats
                     formats = info.get("formats", [])
                     audio_fmts = [
                         f for f in formats
@@ -113,10 +130,10 @@ def search_youtube(query: str) -> dict | None:
                         url = formats[-1]["url"]
 
                 if not url:
-                    log.warning(f"Strategy {i+1}: no URL found")
+                    log.warning(f"Strategy {i+1}: no URL in result")
                     continue
 
-                log.info(f"Strategy {i+1} succeeded for: {info.get('title', 'Unknown')}")
+                log.info(f"Strategy {i+1} succeeded: {info.get('title', 'Unknown')[:60]}")
                 return {
                     "url":      url,
                     "title":    info.get("title", "Unknown"),
@@ -127,14 +144,14 @@ def search_youtube(query: str) -> dict | None:
                 }
         except yt_dlp.utils.DownloadError as e:
             last_error = str(e)
-            log.warning(f"Strategy {i+1} failed: {last_error[:120]}")
+            log.warning(f"Strategy {i+1} failed: {last_error[:100]}")
             continue
         except Exception as e:
             last_error = str(e)
-            log.warning(f"Strategy {i+1} unexpected error: {last_error[:120]}")
+            log.warning(f"Strategy {i+1} error: {last_error[:100]}")
             continue
 
-    log.error(f"All strategies failed. Last error: {last_error}")
+    log.error(f"All {len(_STRATEGIES)} strategies failed. Last: {last_error}")
     return None
 
 
