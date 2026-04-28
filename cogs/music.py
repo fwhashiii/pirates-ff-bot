@@ -275,6 +275,19 @@ class MusicCog(commands.Cog, name="Music"):
             await interaction.edit_original_response(
                 content="❌ Couldn't find that song. Try a different search term."
             )
+            # Announce in channel if all sources failed
+            try:
+                channel_id = int(os.getenv("ANNOUNCEMENTS_CHANNEL_ID", 0))
+                if channel_id:
+                    ann_ch = interaction.guild.get_channel(channel_id)
+                    if ann_ch:
+                        embed = discord.Embed(title="⚠️ Music Bot Issue", color=0xFF4500)
+                        embed.add_field(name="🇬🇧 English", value="Music is temporarily unavailable. We're working on it!", inline=False)
+                        embed.add_field(name="🇸🇦 العربية", value="الموسيقى غير متاحة مؤقتاً. نعمل على إصلاح المشكلة!", inline=False)
+                        embed.add_field(name="🇸🇴 Soomaali", value="Muusikada waxay ku jirtaa dhibaato ku meel gaar ah. Waxaan ka shaqeyneynaa!", inline=False)
+                        await ann_ch.send(embed=embed)
+            except Exception:
+                pass
             return
 
         # ── Step 2: Connect to voice AFTER finding the song ──
