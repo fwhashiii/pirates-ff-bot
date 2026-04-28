@@ -94,25 +94,33 @@ for _s in _STRATEGIES:
 
 
 def search_youtube(query: str) -> dict | None:
-    """Try SoundCloud first, then multiple YouTube strategies."""
-    # For direct YouTube URLs, skip SoundCloud
-    is_yt_url = "youtube.com" in query or "youtu.be" in query
-    strategies = _STRATEGIES[1:] if is_yt_url else _STRATEGIES
+    """Try SoundCloud first, then multiple YouTube strategies. Downloads to temp file."""
+    import tempfile
+    import subprocess
 
+    # First get the URL via yt-dlp
     if not query.startswith("http"):
-        # Try SoundCloud search first (strategy 0), then YouTube
-        pass
+        sc_query = f"scsearch1:{query}"
+        yt_query = f"ytsearch1:{query}"
+    else:
+        sc_query = query
+        yt_query = query
 
+    # Try to get audio URL
+    track = None
     last_error = None
-    for i, opts in enumerate(strategies):
-        search_query = query
-        if not search_query.startswith("http"):
-            prefix = "scsearch1:" if opts.get("default_search") == "scsearch" else "ytsearch1:"
-            search_query = f"{prefix}{query}"
 
+    strategies = [
+        (_STRATEGIES[0], sc_query),   # SoundCloud
+        (_STRATEGIES[1], yt_query),   # YouTube mweb
+        (_STRATEGIES[2], yt_query),   # YouTube tv_embedded
+        (_STRATEGIES[3], yt_query),   # YouTube android
+    ]
+
+    for i, (opts, q) in enumerate(strategies):
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(search_query, download=False)
+                info = ydl.extract_info(q, download=False)
                 if info is None:
                     continue
                 if "entries" in info:
@@ -124,10 +132,7 @@ def search_youtube(query: str) -> dict | None:
                 url = info.get("url")
                 if not url:
                     formats = info.get("formats", [])
-                    audio_fmts = [
-                        f for f in formats
-                        if f.get("acodec") != "none" and f.get("vcodec") == "none"
-                    ]
+                    audio_fmts = [f for f in formats if f.get("acodec") != "none" and f.get("vcodec") == "none"]
                     if audio_fmts:
                         url = audio_fmts[-1]["url"]
                     elif formats:
@@ -137,15 +142,58 @@ def search_youtube(query: str) -> dict | None:
                     continue
 
                 source = "SoundCloud" if opts.get("default_search") == "scsearch" else "YouTube"
-                log.info(f"Strategy {i+1} ({source}) succeeded: {info.get('title', '')[:60]}")
+                log.info(f"Strategy {i+1} ({source}) found: {info.get('title', '')[:60]}")
+
+                # Download to temp file to avoid URL expiry issues
+                tmp = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+                tmp.close()
+                tmp_path = tmp.name
+
+                try:
+                    result = subprocess.run(
+                        [
+                            "ffmpeg", "-y",
+                            "-reconnect", "1",
+                            "-reconnect_streamed", "1",
+                            "-reconnect_delay_max", "5",
+                            "-i", url,
+                            "-vn", "-acodec", "libmp3lame",
+                            "-q:a", "2",
+                            "-t", "600",  # max 10 min
+                            tmp_path
+                        ],
+                        capture_output=True,
+                        timeout=60
+                    )
+                    if result.returncode != 0:
+                        log.warning(f"FFmpeg download failed: {result.stderr[-200:].decode()}")
+                        os.unlink(tmp_path)
+                        continue
+                except subprocess.TimeoutExpired:
+                    log.warning("FFmpeg download timed out")
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
+                    continue
+                except Exception as e:
+                    log.warning(f"FFmpeg download error: {e}")
+                    try:
+                        os.unlink(tmp_path)
+                    except Exception:
+                        pass
+                    continue
+
+                log.info(f"Downloaded to {tmp_path}")
                 return {
-                    "url":      url,
+                    "url":      tmp_path,
                     "title":    info.get("title", "Unknown"),
                     "duration": info.get("duration", 0) or 0,
                     "webpage":  info.get("webpage_url", ""),
                     "thumbnail": info.get("thumbnail", ""),
                     "uploader": info.get("uploader", "Unknown"),
                     "source":   source,
+                    "is_file":  True,
                 }
         except yt_dlp.utils.DownloadError as e:
             last_error = str(e)
@@ -225,6 +273,13 @@ class MusicCog(commands.Cog, name="Music"):
             def after(error):
                 if error:
                     log.error(f"Playback error: {error}")
+                # Clean up temp file if it was downloaded
+                if track.get("is_file"):
+                    try:
+                        os.unlink(track["url"])
+                        log.debug(f"Cleaned up temp file: {track['url']}")
+                    except Exception:
+                        pass
                 asyncio.run_coroutine_threadsafe(
                     self._after_track(guild), self.bot.loop
                 )
