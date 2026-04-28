@@ -62,7 +62,7 @@ class VoiceMonitorCog(commands.Cog, name="Voice Monitor"):
         self.openai = AsyncOpenAI(api_key=self.api_key) if (_openai_available and self.api_key) else None
         self._monitor_tasks: dict[int, asyncio.Task] = {}
 
-    # ── Auto-monitor on voice join ────────────────────────
+    # ── Voice state: only handle disconnect cleanup ───────
     @commands.Cog.listener()
     async def on_voice_state_update(
         self,
@@ -70,52 +70,15 @@ class VoiceMonitorCog(commands.Cog, name="Voice Monitor"):
         before: discord.VoiceState,
         after: discord.VoiceState,
     ):
-        """Auto-join and monitor any voice channel a member enters."""
-        # Ignore all bot movements (including our own bot reconnecting)
+        """Only handles cleanup when the last human leaves a monitored channel.
+        Auto-join is disabled — use /monitor to start manually."""
         if member.bot:
             return
 
         guild = member.guild
 
-        # Member joined a voice channel
-        if after.channel and not before.channel:
-            channel = after.channel
-
-            # Skip private staff VCs
-            staff_vc_names = ["👑 OWNER VC", "⚔️ CAPTAIN VC", "🛡️ MOD VC", "🔒 STAFF LOUNGE"]
-            if channel.name.upper() in [n.upper() for n in staff_vc_names]:
-                return
-
-            # Don't join if music is active in this guild
-            if MUSIC_ACTIVE.get(guild.id):
-                log.info(f"Skipping monitor join — music is active in {guild.name}")
-                return
-
-            # Don't join if any bot is already in a voice channel
-            if guild.voice_client:
-                return
-
-            # Already monitoring this guild
-            if guild.id in _monitors:
-                return
-
-            # Small delay to let Discord settle before connecting
-            await asyncio.sleep(3)
-
-            # Re-check everything after the delay
-            if MUSIC_ACTIVE.get(guild.id):
-                return
-            if guild.id in _monitors or guild.voice_client:
-                return
-            if member not in channel.members:
-                return
-
-            # Spawn a background task to connect — avoids blocking the event loop
-            _monitors[guild.id] = None  # placeholder to block duplicate triggers
-            asyncio.create_task(self._connect_and_monitor(guild, channel, member))
-
-        # Last human left the channel the bot is in — disconnect
-        elif before.channel and not after.channel:
+        # Last human left the channel the bot is monitoring — disconnect
+        if before.channel and not after.channel:
             vc = _monitors.get(guild.id)
             if vc and vc.channel == before.channel:
                 humans = [m for m in before.channel.members if not m.bot]
@@ -132,7 +95,7 @@ class VoiceMonitorCog(commands.Cog, name="Voice Monitor"):
                                 await vc.disconnect()
                         except Exception:
                             pass
-                        log.info(f"Auto-monitor stopped: {before.channel.name} (channel empty)")
+                        log.info(f"Monitor stopped: {before.channel.name} (channel empty)")
 
     async def _connect_and_monitor(
         self,
