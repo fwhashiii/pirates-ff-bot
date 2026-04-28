@@ -193,7 +193,8 @@ class MusicCog(commands.Cog, name="Music"):
     def _play_next(self, guild: discord.Guild):
         state = get_state(guild.id)
         vc = guild.voice_client
-        if not vc:
+        if not vc or not vc.is_connected():
+            log.warning("_play_next called but no voice client connected")
             return
 
         if state.loop and state.current:
@@ -320,7 +321,10 @@ class MusicCog(commands.Cog, name="Music"):
         state = get_state(guild.id)
         state.queue.append(track)
 
-        # Start playing immediately — don't delay
+        # Wait for voice connection to fully stabilize before playing
+        await asyncio.sleep(1)
+
+        # Start playing immediately
         if not vc.is_playing() and not vc.is_paused():
             self._play_next(guild)
 
