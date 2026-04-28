@@ -148,7 +148,7 @@ class MusicCog(commands.Cog, name="Music"):
                 track["url"],
                 executable=FFMPEG_PATH,
                 before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-                options="-vn",
+                options="-vn -acodec pcm_s16le -ar 48000 -ac 2",
             )
             source = discord.PCMVolumeTransformer(source, volume=state.volume)
 
