@@ -1,6 +1,6 @@
 """
 🎵 Music Cog — Play music from YouTube in voice channels
-Commands: /play /skip /stop /queue /pause /resume /nowplaying /volume
+Commands: /play /skip /stop /queue /pause /resume /nowplaying /volume /loop /musicstatus
 """
 
 import discord
@@ -9,80 +9,143 @@ from discord import app_commands
 import asyncio
 import yt_dlp
 import logging
+import os
 from collections import deque
 from datetime import datetime
 
 log = logging.getLogger("cog.music")
 
-import os as _os_module
-FFMPEG_PATH = _os_module.environ.get("FFMPEG_PATH", "ffmpeg")  # Railway uses system ffmpeg
+FFMPEG_PATH = os.environ.get("FFMPEG_PATH", "ffmpeg")
 
-FFMPEG_OPTIONS = {
-    "executable": FFMPEG_PATH,
-    "before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-    "options": "-vn -loglevel error",
-}
+# ── Cookie file path (VPS or local) ──────────────────────
+_COOKIE_PATHS = [
+    "/root/bot/youtube_cookies.txt",
+    os.path.join(os.path.dirname(__file__), "..", "youtube_cookies.txt"),
+]
+COOKIE_FILE = next((p for p in _COOKIE_PATHS if os.path.exists(p)), None)
 
-
-def is_spotify(query: str) -> bool:
-    return "spotify.com" in query
-
-
-def search_youtube(query: str) -> dict | None:
-    """Stream audio directly from YouTube."""
-    import os as _os
-    # Add Node.js to PATH if on Windows
-    node_path = r"C:\Program Files\nodejs"
-    if _os.path.exists(node_path):
-        env_path = _os.environ.get("PATH", "")
-        if node_path not in env_path:
-            _os.environ["PATH"] = node_path + ";" + env_path
-
+# ── yt-dlp options — tries multiple strategies ────────────
+def _make_ydl_opts(use_cookies: bool = True) -> dict:
     opts = {
-        "format":         "bestaudio/best",
-        "noplaylist":     True,
-        "quiet":          True,
-        "no_warnings":    True,
+        "format": "bestaudio[ext=webm]/bestaudio[ext=m4a]/bestaudio/best",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
         "default_search": "ytsearch",
         "source_address": "0.0.0.0",
+        # tv_embedded client bypasses bot-detection without needing PO tokens
         "extractor_args": {
             "youtube": {
-                "player_client": ["android", "web"],
+                "player_client": ["tv_embedded", "android", "web"],
+                "player_skip": ["webpage", "configs"],
             }
         },
         "http_headers": {
-            "User-Agent": "com.google.android.youtube/17.36.4 (Linux; U; Android 12; GB) gzip",
+            "User-Agent": (
+                "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version"
+            ),
         },
-        "cookiefile": "/root/bot/youtube_cookies.txt" if _os.path.exists("/root/bot/youtube_cookies.txt") else None,
-        "format_sort": ["abr", "asr"],
+        "socket_timeout": 30,
+        "retries": 3,
+        "fragment_retries": 3,
     }
-    with yt_dlp.YoutubeDL(opts) as ydl:
+    if use_cookies and COOKIE_FILE:
+        opts["cookiefile"] = COOKIE_FILE
+        log.info(f"Using cookies from: {COOKIE_FILE}")
+    return opts
+
+
+def search_youtube(query: str) -> dict | None:
+    """
+    Try to get a streamable audio URL from YouTube.
+    Strategy order:
+      1. tv_embedded client + cookies (if available)
+      2. tv_embedded client without cookies
+      3. android client only
+    """
+    if not query.startswith("http"):
+        query = f"ytsearch1:{query}"
+
+    strategies = [
+        _make_ydl_opts(use_cookies=True),
+        _make_ydl_opts(use_cookies=False),
+        # Fallback: android only, no extras
+        {
+            "format": "bestaudio/best",
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "default_search": "ytsearch",
+            "source_address": "0.0.0.0",
+            "extractor_args": {
+                "youtube": {"player_client": ["android"]}
+            },
+            "http_headers": {
+                "User-Agent": "com.google.android.youtube/17.36.4 (Linux; U; Android 12; GB) gzip",
+            },
+        },
+    ]
+
+    last_error = None
+    for i, opts in enumerate(strategies):
         try:
-            if not query.startswith("http"):
-                query = f"ytsearch:{query}"
-            info = ydl.extract_info(query, download=False)
-            if "entries" in info:
-                info = info["entries"][0]
-            return {
-                "url":      info["url"],
-                "title":    info.get("title", "Unknown"),
-                "duration": info.get("duration", 0),
-                "webpage":  info.get("webpage_url", ""),
-                "thumbnail":info.get("thumbnail", ""),
-                "uploader": info.get("uploader", "Unknown"),
-            }
+            with yt_dlp.YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(query, download=False)
+                if info is None:
+                    continue
+                if "entries" in info:
+                    entries = [e for e in info["entries"] if e]
+                    if not entries:
+                        continue
+                    info = entries[0]
+
+                url = info.get("url")
+                if not url:
+                    # Try to get from formats
+                    formats = info.get("formats", [])
+                    audio_fmts = [
+                        f for f in formats
+                        if f.get("acodec") != "none" and f.get("vcodec") == "none"
+                    ]
+                    if audio_fmts:
+                        url = audio_fmts[-1]["url"]
+                    elif formats:
+                        url = formats[-1]["url"]
+
+                if not url:
+                    log.warning(f"Strategy {i+1}: no URL found")
+                    continue
+
+                log.info(f"Strategy {i+1} succeeded for: {info.get('title', 'Unknown')}")
+                return {
+                    "url":      url,
+                    "title":    info.get("title", "Unknown"),
+                    "duration": info.get("duration", 0) or 0,
+                    "webpage":  info.get("webpage_url", ""),
+                    "thumbnail": info.get("thumbnail", ""),
+                    "uploader": info.get("uploader", "Unknown"),
+                }
+        except yt_dlp.utils.DownloadError as e:
+            last_error = str(e)
+            log.warning(f"Strategy {i+1} failed: {last_error[:120]}")
+            continue
         except Exception as e:
-            log.error(f"yt-dlp error: {e}")
-            return None
+            last_error = str(e)
+            log.warning(f"Strategy {i+1} unexpected error: {last_error[:120]}")
+            continue
+
+    log.error(f"All strategies failed. Last error: {last_error}")
+    return None
 
 
 def fmt_duration(seconds: int) -> str:
+    seconds = int(seconds)
     m, s = divmod(seconds, 60)
     h, m = divmod(m, 60)
     return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
 
 
-# Per-guild music state
+# ── Per-guild music state ─────────────────────────────────
 class GuildMusic:
     def __init__(self):
         self.queue:   deque[dict] = deque()
@@ -118,38 +181,56 @@ class MusicCog(commands.Cog, name="Music"):
             state.current = track
         else:
             state.current = None
+            asyncio.run_coroutine_threadsafe(
+                self._disconnect_when_empty(guild), self.bot.loop
+            )
             return
 
-        source = discord.FFmpegPCMAudio(
-            track["url"],
-            executable=FFMPEG_PATH,
-            before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-            options="-vn",
-            stderr=__import__("subprocess").PIPE,
-        )
-        source = discord.PCMVolumeTransformer(source, volume=state.volume)
+        try:
+            source = discord.FFmpegPCMAudio(
+                track["url"],
+                executable=FFMPEG_PATH,
+                before_options=(
+                    "-reconnect 1 -reconnect_streamed 1 "
+                    "-reconnect_delay_max 5 -nostdin"
+                ),
+                options="-vn -loglevel error",
+            )
+            source = discord.PCMVolumeTransformer(source, volume=state.volume)
 
-        def after(error):
-            if error:
-                log.error(f"Playback error: {error}")
+            def after(error):
+                if error:
+                    log.error(f"Playback error: {error}")
+                asyncio.run_coroutine_threadsafe(
+                    self._after_track(guild), self.bot.loop
+                )
+
+            vc.play(source, after=after)
+        except Exception as e:
+            log.error(f"Failed to start playback: {e}")
             asyncio.run_coroutine_threadsafe(
                 self._after_track(guild), self.bot.loop
             )
-
-        vc.play(source, after=after)
 
     async def _after_track(self, guild: discord.Guild):
         await asyncio.sleep(0.5)
         self._play_next(guild)
 
+    async def _disconnect_when_empty(self, guild: discord.Guild):
+        """Disconnect after queue is empty (with a delay to allow new songs)."""
+        await asyncio.sleep(300)  # Wait 5 min before auto-disconnect
+        state = get_state(guild.id)
+        vc = guild.voice_client
+        if vc and not vc.is_playing() and not state.queue:
+            await vc.disconnect()
+            log.info(f"Auto-disconnected from {guild.name} (queue empty)")
+
     # ── /play ─────────────────────────────────────────────
     @app_commands.command(name="play", description="Play a song from YouTube 🎵")
     @app_commands.describe(query="Song name or YouTube URL")
     async def slash_play(self, interaction: discord.Interaction, query: str):
-        # Respond immediately to avoid interaction timeout
         await interaction.response.defer(thinking=True)
 
-        # Must be in a voice channel
         if not interaction.user.voice:
             await interaction.followup.send("❌ Join a voice channel first!", ephemeral=True)
             return
@@ -159,43 +240,55 @@ class MusicCog(commands.Cog, name="Music"):
         vc = guild.voice_client
 
         # Connect or move
-        if not vc:
-            vc = await vc_channel.connect()
-        elif vc.channel != vc_channel:
-            await vc.move_to(vc_channel)
+        try:
+            if not vc:
+                vc = await vc_channel.connect()
+            elif vc.channel != vc_channel:
+                await vc.move_to(vc_channel)
+        except Exception as e:
+            await interaction.followup.send(f"❌ Couldn't connect to voice: {e}", ephemeral=True)
+            return
 
-        # Pause voice monitor if it's active in this guild
-        from cogs.voice_monitor import _monitors as vm_monitors, MUSIC_ACTIVE
-        MUSIC_ACTIVE[guild.id] = True  # Lock monitor out
-        if guild.id in vm_monitors:
-            vm_vc = vm_monitors.pop(guild.id, None)
-            if vm_vc and isinstance(vm_vc, discord.VoiceClient):
-                try:
-                    await vm_vc.disconnect(force=True)
-                    log.info("Paused voice monitor for music playback")
-                except Exception:
-                    pass
+        # Pause voice monitor if active
+        try:
+            from cogs.voice_monitor import _monitors as vm_monitors, MUSIC_ACTIVE
+            MUSIC_ACTIVE[guild.id] = True
+            if guild.id in vm_monitors:
+                vm_vc = vm_monitors.pop(guild.id, None)
+                if vm_vc and isinstance(vm_vc, discord.VoiceClient):
+                    try:
+                        await vm_vc.disconnect(force=True)
+                    except Exception:
+                        pass
+        except ImportError:
+            pass
 
-        # Search
-        await interaction.followup.send(f"🔍 Searching for `{query}`... *(10-15 seconds)*")
+        await interaction.followup.send(f"🔍 Searching for **{query}**...")
+
         try:
             track = await asyncio.wait_for(
                 asyncio.get_event_loop().run_in_executor(None, search_youtube, query),
-                timeout=30.0
+                timeout=45.0,
             )
         except asyncio.TimeoutError:
             await interaction.edit_original_response(content="❌ Search timed out. Try again.")
             return
 
         if not track:
-            await interaction.edit_original_response(content="❌ Couldn't find that song. Try a different search.")
+            await interaction.edit_original_response(
+                content=(
+                    "❌ Couldn't find that song.\n"
+                    "Try a different search term or a direct YouTube URL."
+                )
+            )
             return
 
         state = get_state(guild.id)
         state.queue.append(track)
 
         embed = discord.Embed(color=0xFF4500, timestamp=datetime.utcnow())
-        embed.set_thumbnail(url=track["thumbnail"])
+        if track.get("thumbnail"):
+            embed.set_thumbnail(url=track["thumbnail"])
 
         if vc.is_playing() or vc.is_paused():
             embed.title = "➕ Added to Queue"
@@ -209,7 +302,10 @@ class MusicCog(commands.Cog, name="Music"):
             embed.add_field(name="⏱️ Duration", value=fmt_duration(track["duration"]), inline=True)
             embed.add_field(name="📺 Channel",  value=track["uploader"],               inline=True)
 
-        embed.set_footer(text=f"Requested by {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
+        embed.set_footer(
+            text=f"Requested by {interaction.user.display_name}",
+            icon_url=interaction.user.display_avatar.url,
+        )
         await interaction.edit_original_response(content=None, embed=embed)
 
     # ── /skip ─────────────────────────────────────────────
@@ -231,9 +327,11 @@ class MusicCog(commands.Cog, name="Music"):
         state.current = None
         if vc:
             await vc.disconnect()
-        # Release music lock so monitor can rejoin
-        from cogs.voice_monitor import MUSIC_ACTIVE
-        MUSIC_ACTIVE[interaction.guild.id] = False
+        try:
+            from cogs.voice_monitor import MUSIC_ACTIVE
+            MUSIC_ACTIVE[interaction.guild.id] = False
+        except ImportError:
+            pass
         await interaction.response.send_message("🛑 Stopped and disconnected.")
 
     # ── /pause ────────────────────────────────────────────
@@ -294,7 +392,8 @@ class MusicCog(commands.Cog, name="Music"):
             color=0xFF4500,
             timestamp=datetime.utcnow(),
         )
-        embed.set_thumbnail(url=t["thumbnail"])
+        if t.get("thumbnail"):
+            embed.set_thumbnail(url=t["thumbnail"])
         embed.add_field(name="⏱️ Duration", value=fmt_duration(t["duration"]), inline=True)
         embed.add_field(name="📺 Channel",  value=t["uploader"],               inline=True)
         await interaction.response.send_message(embed=embed)
@@ -323,9 +422,11 @@ class MusicCog(commands.Cog, name="Music"):
     # ── /musicstatus ──────────────────────────────────────
     @app_commands.command(name="musicstatus", description="Check the music bot's status 🎵")
     async def slash_musicstatus(self, interaction: discord.Interaction):
-        import psutil, platform, time
-        bot = interaction.client
+        import psutil
+        import platform
+        import time
 
+        bot = interaction.client
         latency = round(bot.latency * 1000)
         latency_color = 0x00FF7F if latency < 100 else 0xFFD700 if latency < 200 else 0xFF4500
 
@@ -347,15 +448,16 @@ class MusicCog(commands.Cog, name="Music"):
             timestamp=datetime.utcnow(),
         )
         embed.set_thumbnail(url=bot.user.display_avatar.url)
-        embed.add_field(name="🏓 Latency",      value=f"{latency}ms",                          inline=True)
-        embed.add_field(name="⏱️ Uptime",        value=uptime_str,                              inline=True)
-        embed.add_field(name="💾 Memory",        value=f"{mem_mb} MB",                          inline=True)
-        embed.add_field(name="🖥️ CPU",           value=f"{cpu}%",                               inline=True)
-        embed.add_field(name="🎵 Now Playing",   value=state.current["title"][:40] if state.current else "Nothing", inline=True)
-        embed.add_field(name="📋 Queue",         value=f"{len(state.queue)} songs",             inline=True)
-        embed.add_field(name="🔊 Voice",         value=vc.channel.name if vc else "Not connected", inline=True)
-        embed.add_field(name="🔁 Loop",          value="On" if state.loop else "Off",           inline=True)
-        embed.add_field(name="🐍 Python",        value=platform.python_version(),               inline=True)
+        embed.add_field(name="🏓 Latency",    value=f"{latency}ms",                                    inline=True)
+        embed.add_field(name="⏱️ Uptime",      value=uptime_str,                                       inline=True)
+        embed.add_field(name="💾 Memory",      value=f"{mem_mb} MB",                                   inline=True)
+        embed.add_field(name="🖥️ CPU",         value=f"{cpu}%",                                        inline=True)
+        embed.add_field(name="🎵 Now Playing", value=(state.current["title"][:40] if state.current else "Nothing"), inline=True)
+        embed.add_field(name="📋 Queue",       value=f"{len(state.queue)} songs",                      inline=True)
+        embed.add_field(name="🔊 Voice",       value=(vc.channel.name if vc else "Not connected"),     inline=True)
+        embed.add_field(name="🔁 Loop",        value=("On" if state.loop else "Off"),                  inline=True)
+        embed.add_field(name="🍪 Cookies",     value=("✅ Loaded" if COOKIE_FILE else "❌ Not found"), inline=True)
+        embed.add_field(name="🐍 Python",      value=platform.python_version(),                        inline=True)
         embed.set_footer(text=f"Music Bot ID: {bot.user.id}")
         await interaction.response.send_message(embed=embed)
 
