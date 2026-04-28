@@ -71,7 +71,7 @@ class VoiceMonitorCog(commands.Cog, name="Voice Monitor"):
         after: discord.VoiceState,
     ):
         """Auto-join and monitor any voice channel a member enters."""
-        log.info(f"Voice state update: {member} before={before.channel} after={after.channel}")
+        # Ignore all bot movements (including our own bot reconnecting)
         if member.bot:
             return
 
@@ -86,7 +86,12 @@ class VoiceMonitorCog(commands.Cog, name="Voice Monitor"):
             if channel.name.upper() in [n.upper() for n in staff_vc_names]:
                 return
 
-            # Don't join if bot is already in any voice channel
+            # Don't join if music is active in this guild
+            if MUSIC_ACTIVE.get(guild.id):
+                log.info(f"Skipping monitor join — music is active in {guild.name}")
+                return
+
+            # Don't join if any bot is already in a voice channel
             if guild.voice_client:
                 return
 
@@ -97,7 +102,9 @@ class VoiceMonitorCog(commands.Cog, name="Voice Monitor"):
             # Small delay to let Discord settle before connecting
             await asyncio.sleep(3)
 
-            # Check again after delay
+            # Re-check everything after the delay
+            if MUSIC_ACTIVE.get(guild.id):
+                return
             if guild.id in _monitors or guild.voice_client:
                 return
             if member not in channel.members:
@@ -137,12 +144,19 @@ class VoiceMonitorCog(commands.Cog, name="Voice Monitor"):
         if guild.id not in _monitors:
             return
 
-        try:
-            # Clean up any stale connection
-            if guild.voice_client:
-                await guild.voice_client.disconnect(force=True)
-                await asyncio.sleep(1)
+        # Final check — abort if music became active while we were waiting
+        if MUSIC_ACTIVE.get(guild.id):
+            _monitors.pop(guild.id, None)
+            log.info(f"Aborted monitor connect — music is now active in {guild.name}")
+            return
 
+        # Abort if another voice client appeared (e.g. music bot connected)
+        if guild.voice_client:
+            _monitors.pop(guild.id, None)
+            log.info(f"Aborted monitor connect — voice client already exists in {guild.name}")
+            return
+
+        try:
             vc = await channel.connect(timeout=30.0, reconnect=False, self_deaf=True)
             log.info(f"Connected to {channel.name}")
         except Exception as e:
