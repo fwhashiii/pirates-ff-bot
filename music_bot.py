@@ -59,7 +59,7 @@ async def announce_failure(reason: str = "unknown error"):
             inline=False,
         )
         embed.set_footer(text="PIRATES Music Bot • Auto-restart in progress")
-        await channel.send(embed=embed)
+        await channel.send(content="@everyone", embed=embed)
         log.info("Sent failure announcement to channel")
     except Exception as e:
         log.error(f"Failed to send failure announcement: {e}")

@@ -47,7 +47,7 @@ async def main():
         )
         embed.set_footer(text="PIRATES Music Bot • Test Message")
 
-        await channel.send(embed=embed)
+        await channel.send(content="@everyone", embed=embed)
         print(f"✅ Test message sent to #{channel.name}")
         await client.close()
 

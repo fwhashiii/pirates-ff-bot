@@ -285,7 +285,7 @@ class MusicCog(commands.Cog, name="Music"):
                         embed.add_field(name="🇬🇧 English", value="Music is temporarily unavailable. We're working on it!", inline=False)
                         embed.add_field(name="🇸🇦 العربية", value="الموسيقى غير متاحة مؤقتاً. نعمل على إصلاح المشكلة!", inline=False)
                         embed.add_field(name="🇸🇴 Soomaali", value="Muusikada waxay ku jirtaa dhibaato ku meel gaar ah. Waxaan ka shaqeyneynaa!", inline=False)
-                        await ann_ch.send(embed=embed)
+                        await ann_ch.send(content="@everyone", embed=embed)
             except Exception:
                 pass
             return
