@@ -37,6 +37,16 @@ async def on_ready():
             name="music 🎵 | /play",
         )
     )
+
+    # Force-disconnect from any lingering voice sessions (fixes error 4006)
+    for guild in bot.guilds:
+        if guild.voice_client:
+            try:
+                await guild.voice_client.disconnect(force=True)
+                log.info(f"Cleared stale voice session in {guild.name}")
+            except Exception:
+                pass
+
     try:
         guild_id = int(os.getenv("GUILD_ID", 0))
         if guild_id:
@@ -49,6 +59,17 @@ async def on_ready():
             log.info(f"Synced {len(synced)} music commands globally.")
     except Exception as e:
         log.error(f"Sync failed: {e}")
+
+
+@bot.event
+async def on_resumed():
+    log.info("Music bot reconnected — clearing stale voice sessions")
+    for guild in bot.guilds:
+        if guild.voice_client:
+            try:
+                await guild.voice_client.disconnect(force=True)
+            except Exception:
+                pass
 
 
 async def main():

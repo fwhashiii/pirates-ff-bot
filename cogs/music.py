@@ -245,6 +245,23 @@ class MusicCog(commands.Cog, name="Music"):
                 vc = await vc_channel.connect()
             elif vc.channel != vc_channel:
                 await vc.move_to(vc_channel)
+        except discord.errors.ConnectionClosed as e:
+            if e.code == 4006:
+                # Stale session — force disconnect and reconnect
+                log.warning("Got 4006 (already authenticated) — forcing reconnect")
+                try:
+                    await guild.voice_client.disconnect(force=True)
+                    await asyncio.sleep(2)
+                except Exception:
+                    pass
+                try:
+                    vc = await vc_channel.connect()
+                except Exception as e2:
+                    await interaction.followup.send(f"❌ Couldn't connect to voice: {e2}", ephemeral=True)
+                    return
+            else:
+                await interaction.followup.send(f"❌ Couldn't connect to voice: {e}", ephemeral=True)
+                return
         except Exception as e:
             await interaction.followup.send(f"❌ Couldn't connect to voice: {e}", ephemeral=True)
             return
