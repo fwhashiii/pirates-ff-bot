@@ -24,9 +24,20 @@ _COOKIE_PATHS = [
 ]
 COOKIE_FILE = next((p for p in _COOKIE_PATHS if os.path.exists(p)), None)
 
-# ── yt-dlp strategies — no cookies needed ────────────────
+# ── yt-dlp strategies ────────────────────────────────────
 _STRATEGIES = [
-    # 1. mweb client — lightweight mobile web, least bot-detection
+    # 1. SoundCloud — no bot detection, works on any IP
+    {
+        "format": "bestaudio/best",
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+        "default_search": "scsearch",
+        "source_address": "0.0.0.0",
+        "socket_timeout": 30,
+        "retries": 3,
+    },
+    # 2. YouTube mweb client
     {
         "format": "bestaudio/best",
         "noplaylist": True,
@@ -35,14 +46,12 @@ _STRATEGIES = [
         "default_search": "ytsearch",
         "source_address": "0.0.0.0",
         "extractor_args": {
-            "youtube": {
-                "player_client": ["mweb"],
-            }
+            "youtube": {"player_client": ["mweb"]}
         },
         "socket_timeout": 30,
         "retries": 3,
     },
-    # 2. tv_embedded — TV client, bypasses most bot checks
+    # 3. YouTube tv_embedded
     {
         "format": "bestaudio/best",
         "noplaylist": True,
@@ -59,7 +68,7 @@ _STRATEGIES = [
         "socket_timeout": 30,
         "retries": 3,
     },
-    # 3. android — mobile app client
+    # 4. YouTube android
     {
         "format": "bestaudio/best",
         "noplaylist": True,
@@ -76,38 +85,34 @@ _STRATEGIES = [
         "socket_timeout": 30,
         "retries": 3,
     },
-    # 4. ios — Apple client, different bot-detection path
-    {
-        "format": "bestaudio/best",
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "default_search": "ytsearch",
-        "source_address": "0.0.0.0",
-        "extractor_args": {
-            "youtube": {"player_client": ["ios"]}
-        },
-        "socket_timeout": 30,
-        "retries": 3,
-    },
 ]
 
-# Add cookies to all strategies if available
+# Add cookies to YouTube strategies if available
 for _s in _STRATEGIES:
-    if COOKIE_FILE:
+    if COOKIE_FILE and _s.get("default_search") == "ytsearch":
         _s["cookiefile"] = COOKIE_FILE
 
 
 def search_youtube(query: str) -> dict | None:
-    """Try multiple yt-dlp strategies to get a streamable audio URL."""
+    """Try SoundCloud first, then multiple YouTube strategies."""
+    # For direct YouTube URLs, skip SoundCloud
+    is_yt_url = "youtube.com" in query or "youtu.be" in query
+    strategies = _STRATEGIES[1:] if is_yt_url else _STRATEGIES
+
     if not query.startswith("http"):
-        query = f"ytsearch1:{query}"
+        # Try SoundCloud search first (strategy 0), then YouTube
+        pass
 
     last_error = None
-    for i, opts in enumerate(_STRATEGIES):
+    for i, opts in enumerate(strategies):
+        search_query = query
+        if not search_query.startswith("http"):
+            prefix = "scsearch1:" if opts.get("default_search") == "scsearch" else "ytsearch1:"
+            search_query = f"{prefix}{query}"
+
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
-                info = ydl.extract_info(query, download=False)
+                info = ydl.extract_info(search_query, download=False)
                 if info is None:
                     continue
                 if "entries" in info:
@@ -116,7 +121,6 @@ def search_youtube(query: str) -> dict | None:
                         continue
                     info = entries[0]
 
-                # Get best audio URL
                 url = info.get("url")
                 if not url:
                     formats = info.get("formats", [])
@@ -130,10 +134,10 @@ def search_youtube(query: str) -> dict | None:
                         url = formats[-1]["url"]
 
                 if not url:
-                    log.warning(f"Strategy {i+1}: no URL in result")
                     continue
 
-                log.info(f"Strategy {i+1} succeeded: {info.get('title', 'Unknown')[:60]}")
+                source = "SoundCloud" if opts.get("default_search") == "scsearch" else "YouTube"
+                log.info(f"Strategy {i+1} ({source}) succeeded: {info.get('title', '')[:60]}")
                 return {
                     "url":      url,
                     "title":    info.get("title", "Unknown"),
@@ -141,6 +145,7 @@ def search_youtube(query: str) -> dict | None:
                     "webpage":  info.get("webpage_url", ""),
                     "thumbnail": info.get("thumbnail", ""),
                     "uploader": info.get("uploader", "Unknown"),
+                    "source":   source,
                 }
         except yt_dlp.utils.DownloadError as e:
             last_error = str(e)
@@ -151,7 +156,7 @@ def search_youtube(query: str) -> dict | None:
             log.warning(f"Strategy {i+1} error: {last_error[:100]}")
             continue
 
-    log.error(f"All {len(_STRATEGIES)} strategies failed. Last: {last_error}")
+    log.error(f"All strategies failed. Last: {last_error}")
     return None
 
 
@@ -329,12 +334,14 @@ class MusicCog(commands.Cog, name="Music"):
             embed.description = f"**[{track['title']}]({track['webpage']})**"
             embed.add_field(name="⏱️ Duration", value=fmt_duration(track["duration"]), inline=True)
             embed.add_field(name="📋 Position", value=f"#{len(state.queue)}", inline=True)
+            embed.add_field(name="🎵 Source", value=track.get("source", "YouTube"), inline=True)
         else:
             self._play_next(guild)
             embed.title = "🎵 Now Playing"
             embed.description = f"**[{track['title']}]({track['webpage']})**"
             embed.add_field(name="⏱️ Duration", value=fmt_duration(track["duration"]), inline=True)
             embed.add_field(name="📺 Channel",  value=track["uploader"],               inline=True)
+            embed.add_field(name="🎵 Source", value=track.get("source", "YouTube"), inline=True)
 
         embed.set_footer(
             text=f"Requested by {interaction.user.display_name}",
