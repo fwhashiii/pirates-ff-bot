@@ -259,50 +259,9 @@ class MusicCog(commands.Cog, name="Music"):
 
         vc_channel = interaction.user.voice.channel
         guild = interaction.guild
-        vc = guild.voice_client
 
-        # Connect or move — handle stale 4006 sessions
-        try:
-            # Always force-disconnect any existing voice client first
-            if guild.voice_client:
-                try:
-                    await guild.voice_client.disconnect(force=True)
-                    await asyncio.sleep(2)
-                except Exception:
-                    pass
-            vc = await vc_channel.connect(timeout=60.0, reconnect=False)
-        except discord.errors.ConnectionClosed as e:
-            if e.code == 4006:
-                log.warning("Got 4006 — waiting 5s and retrying")
-                await asyncio.sleep(5)
-                try:
-                    vc = await vc_channel.connect(timeout=60.0, reconnect=False)
-                except Exception as e2:
-                    await interaction.followup.send(f"❌ Voice connection failed: {e2}", ephemeral=True)
-                    return
-            else:
-                await interaction.followup.send(f"❌ Couldn't connect to voice: {e}", ephemeral=True)
-                return
-        except Exception as e:
-            await interaction.followup.send(f"❌ Couldn't connect to voice: {e}", ephemeral=True)
-            return
-
-        # Pause voice monitor if active
-        try:
-            from cogs.voice_monitor import _monitors as vm_monitors, MUSIC_ACTIVE
-            MUSIC_ACTIVE[guild.id] = True
-            if guild.id in vm_monitors:
-                vm_vc = vm_monitors.pop(guild.id, None)
-                if vm_vc and isinstance(vm_vc, discord.VoiceClient):
-                    try:
-                        await vm_vc.disconnect(force=True)
-                    except Exception:
-                        pass
-        except ImportError:
-            pass
-
+        # ── Step 1: Search FIRST before connecting to voice ──
         await interaction.followup.send(f"🔍 Searching for **{query}**...")
-
         try:
             track = await asyncio.wait_for(
                 asyncio.get_event_loop().run_in_executor(None, search_youtube, query),
@@ -314,11 +273,34 @@ class MusicCog(commands.Cog, name="Music"):
 
         if not track:
             await interaction.edit_original_response(
-                content=(
-                    "❌ Couldn't find that song.\n"
-                    "Try a different search term or a direct YouTube URL."
-                )
+                content="❌ Couldn't find that song. Try a different search term."
             )
+            return
+
+        # ── Step 2: Connect to voice AFTER finding the song ──
+        vc = guild.voice_client
+        try:
+            if guild.voice_client:
+                try:
+                    await guild.voice_client.disconnect(force=True)
+                    await asyncio.sleep(1)
+                except Exception:
+                    pass
+            vc = await vc_channel.connect(timeout=60.0, reconnect=False)
+        except discord.errors.ConnectionClosed as e:
+            if e.code == 4006:
+                log.warning("Got 4006 — waiting 5s and retrying")
+                await asyncio.sleep(5)
+                try:
+                    vc = await vc_channel.connect(timeout=60.0, reconnect=False)
+                except Exception as e2:
+                    await interaction.edit_original_response(content=f"❌ Voice connection failed: {e2}")
+                    return
+            else:
+                await interaction.edit_original_response(content=f"❌ Couldn't connect to voice: {e}")
+                return
+        except Exception as e:
+            await interaction.edit_original_response(content=f"❌ Couldn't connect to voice: {e}")
             return
 
         state = get_state(guild.id)
