@@ -142,7 +142,8 @@ class MusicCog(commands.Cog, name="Music"):
     @app_commands.command(name="play", description="Play a song from YouTube 🎵")
     @app_commands.describe(query="Song name or YouTube URL")
     async def slash_play(self, interaction: discord.Interaction, query: str):
-        await interaction.response.defer()
+        # Respond immediately to avoid interaction timeout
+        await interaction.response.defer(thinking=True)
 
         # Must be in a voice channel
         if not interaction.user.voice:
