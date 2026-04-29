@@ -239,7 +239,7 @@ class MusicCog(commands.Cog, name="Music"):
                 if vc:
                     await vc.disconnect(force=True)
                     await asyncio.sleep(1)
-                vc = await vc_channel.connect(reconnect=True)
+                vc = await vc_channel.connect(reconnect=True, self_deaf=True)
         except Exception as e:
             await interaction.edit_original_response(content=f"❌ Voice error: {e}")
             return
