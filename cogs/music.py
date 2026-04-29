@@ -452,6 +452,198 @@ class MusicCog(commands.Cog, name="Music"):
         await vc.disconnect()
         await interaction.response.send_message("👋 Disconnected.")
 
+    @app_commands.command(name="search", description="Search and pick from top 5 results 🔎")
+    @app_commands.describe(query="Song to search for")
+    async def slash_search(self, interaction: discord.Interaction, query: str):
+        await interaction.response.defer(thinking=True)
+        if not interaction.user.voice:
+            await interaction.followup.send("❌ Join a voice channel first!", ephemeral=True)
+            return
+
+        await interaction.followup.send(f"🔍 Searching for **{query}**...")
+
+        def get_top5(q):
+            opts = {
+                "format": "bestaudio/best",
+                "noplaylist": True,
+                "quiet": True,
+                "no_warnings": True,
+                "source_address": "0.0.0.0",
+                "socket_timeout": 30,
+            }
+            results = []
+            for src, search_q in [
+                (opts, f"scsearch5:{q}"),
+                ({**opts, "extractor_args": {"youtube": {"player_client": ["android"]}}}, f"ytsearch5:{q}"),
+            ]:
+                try:
+                    with yt_dlp.YoutubeDL(src) as ydl:
+                        info = ydl.extract_info(search_q, download=False)
+                        if info and "entries" in info:
+                            for e in info["entries"][:5]:
+                                if e:
+                                    results.append({
+                                        "title": e.get("title", "Unknown"),
+                                        "duration": e.get("duration", 0) or 0,
+                                        "webpage": e.get("webpage_url", ""),
+                                        "uploader": e.get("uploader", "Unknown"),
+                                        "url": e.get("url", ""),
+                                        "thumbnail": e.get("thumbnail", ""),
+                                        "source": "SoundCloud" if "soundcloud" in e.get("webpage_url", "") else "YouTube",
+                                        "_fresh": True,
+                                    })
+                            if results:
+                                break
+                except Exception:
+                    continue
+            return results[:5]
+
+        try:
+            results = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, get_top5, query),
+                timeout=30.0,
+            )
+        except asyncio.TimeoutError:
+            await interaction.edit_original_response(content="❌ Search timed out.")
+            return
+
+        if not results:
+            await interaction.edit_original_response(content="❌ No results found.")
+            return
+
+        embed = discord.Embed(title=f"🔎 Search Results for: {query}", color=0xFF4500)
+        for i, r in enumerate(results, 1):
+            embed.add_field(
+                name=f"{i}. {r['title'][:50]}",
+                value=f"⏱️ {fmt_duration(r['duration'])} • 📺 {r['uploader'][:30]} • 🎵 {r['source']}",
+                inline=False,
+            )
+        embed.set_footer(text="Reply with a number 1-5 to pick a song (30s timeout)")
+
+        await interaction.edit_original_response(content=None, embed=embed)
+
+        def check(m):
+            return (
+                m.author == interaction.user
+                and m.channel.id == interaction.channel_id
+                and m.content.strip() in [str(i) for i in range(1, len(results) + 1)]
+            )
+
+        try:
+            msg = await self.bot.wait_for("message", check=check, timeout=30.0)
+            choice = int(msg.content.strip()) - 1
+            track = results[choice]
+            await msg.delete()
+        except asyncio.TimeoutError:
+            await interaction.edit_original_response(content="⏰ Search timed out — no selection made.")
+            return
+
+        vc = interaction.guild.voice_client
+        vc_channel = interaction.user.voice.channel
+        try:
+            if vc and vc.is_connected():
+                if vc.channel != vc_channel:
+                    await vc.move_to(vc_channel)
+            else:
+                if vc:
+                    await vc.disconnect(force=True)
+                vc = await vc_channel.connect(reconnect=True)
+        except Exception as e:
+            await interaction.edit_original_response(content=f"❌ Voice error: {e}")
+            return
+
+        state = get_state(interaction.guild.id)
+        state.queue.append(track)
+        if not vc.is_playing() and not vc.is_paused():
+            self._play_next(interaction.guild)
+
+        await interaction.edit_original_response(
+            content=None,
+            embed=discord.Embed(
+                title="🎵 Now Playing" if not vc.is_playing() else "➕ Added to Queue",
+                description=f"**[{track['title']}]({track['webpage']})**",
+                color=0xFF4500,
+            ).add_field(name="⏱️ Duration", value=fmt_duration(track["duration"]), inline=True)
+             .add_field(name="🎵 Source", value=track["source"], inline=True),
+        )
+
+    @app_commands.command(name="move", description="Move a song in the queue 🔃")
+    @app_commands.describe(from_pos="Current position", to_pos="New position")
+    async def slash_move(self, interaction: discord.Interaction, from_pos: int, to_pos: int):
+        state = get_state(interaction.guild.id)
+        q = list(state.queue)
+        if not q:
+            await interaction.response.send_message("❌ Queue is empty.", ephemeral=True)
+            return
+        if not (1 <= from_pos <= len(q)) or not (1 <= to_pos <= len(q)):
+            await interaction.response.send_message(f"❌ Positions must be between 1 and {len(q)}.", ephemeral=True)
+            return
+        track = q.pop(from_pos - 1)
+        q.insert(to_pos - 1, track)
+        state.queue = deque(q)
+        await interaction.response.send_message(f"🔃 Moved **{track['title'][:50]}** from #{from_pos} to #{to_pos}.")
+
+    @app_commands.command(name="autoplay", description="Toggle autoplay — auto-queue related songs 🎲")
+    async def slash_autoplay(self, interaction: discord.Interaction):
+        state = get_state(interaction.guild.id)
+        state.autoplay = not getattr(state, "autoplay", False)
+        await interaction.response.send_message(
+            f"🎲 Autoplay **{'enabled' if state.autoplay else 'disabled'}** — "
+            f"{'will auto-queue related songs when queue ends.' if state.autoplay else 'queue will stop when empty.'}"
+        )
+
+    @app_commands.command(name="bass", description="Toggle bass boost 🔊")
+    async def slash_bass(self, interaction: discord.Interaction):
+        state = get_state(interaction.guild.id)
+        state.bass_boost = not getattr(state, "bass_boost", False)
+        await interaction.response.send_message(
+            f"🔊 Bass boost **{'enabled' if state.bass_boost else 'disabled'}**.\n"
+            f"{'Use `/skip` to apply to current song.' if state.bass_boost else ''}"
+        )
+
+    @app_commands.command(name="lyrics", description="Get lyrics for the current song 📝")
+    async def slash_lyrics(self, interaction: discord.Interaction):
+        await interaction.response.defer(thinking=True)
+        state = get_state(interaction.guild.id)
+        if not state.current:
+            await interaction.followup.send("❌ Nothing is playing.", ephemeral=True)
+            return
+
+        title = state.current.get("title", "")
+        uploader = state.current.get("uploader", "")
+        search_term = f"{title} {uploader}".strip()
+
+        try:
+            import urllib.request, urllib.parse, json
+            # Use lyrics.ovh API (free, no key needed)
+            artist = uploader.replace(" - Topic", "").strip()
+            song = title.strip()
+            url = f"https://api.lyrics.ovh/v1/{urllib.parse.quote(artist)}/{urllib.parse.quote(song)}"
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+            lyrics = data.get("lyrics", "")
+            if not lyrics:
+                raise ValueError("No lyrics found")
+
+            # Split into chunks of 1000 chars
+            chunks = [lyrics[i:i+1000] for i in range(0, min(len(lyrics), 3000), 1000)]
+            embed = discord.Embed(
+                title=f"📝 {title[:50]}",
+                description=chunks[0],
+                color=0xFF4500,
+            )
+            embed.set_footer(text=f"Lyrics via lyrics.ovh • {uploader}")
+            await interaction.followup.send(embed=embed)
+            for chunk in chunks[1:]:
+                await interaction.followup.send(embed=discord.Embed(description=chunk, color=0xFF4500))
+        except Exception:
+            await interaction.followup.send(
+                f"❌ Couldn't find lyrics for **{title}**.\n"
+                f"Try searching: [Genius](https://genius.com/search?q={urllib.parse.quote(search_term)})",
+                ephemeral=True,
+            )
+
     @app_commands.command(name="musicstatus", description="Music bot status 🎵")
     async def slash_musicstatus(self, interaction: discord.Interaction):
         import psutil, platform, time
