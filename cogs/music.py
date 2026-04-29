@@ -131,7 +131,10 @@ class MusicCog(commands.Cog, name="Music"):
         state = get_state(guild.id)
         vc = guild.voice_client
         if not vc or not vc.is_connected():
-            log.warning("_play_next: no voice client")
+            log.warning("_play_next: no voice client — scheduling reconnect")
+            asyncio.run_coroutine_threadsafe(
+                self._reconnect_and_play(guild), self.bot.loop
+            )
             return
 
         if state.loop and state.current:
@@ -155,7 +158,7 @@ class MusicCog(commands.Cog, name="Music"):
                 track["url"],
                 executable=FFMPEG_PATH,
                 before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-                options="-vn -acodec pcm_s16le -ar 48000 -ac 2",
+                options="-vn -ar 48000 -ac 2 -f s16le",
             )
             source = discord.PCMVolumeTransformer(source, volume=state.volume)
 
@@ -169,6 +172,26 @@ class MusicCog(commands.Cog, name="Music"):
         except Exception as e:
             log.error(f"Failed to start playback: {e}")
             asyncio.run_coroutine_threadsafe(self._after_track(guild), self.bot.loop)
+
+    async def _reconnect_and_play(self, guild: discord.Guild):
+        """Reconnect to the last known voice channel and continue playing."""
+        state = get_state(guild.id)
+        if not state.queue and not state.current:
+            return
+        # Find the channel from the queue or current track context
+        # Look for any voice channel with members
+        for vc_channel in guild.voice_channels:
+            members = [m for m in vc_channel.members if not m.bot]
+            if members:
+                try:
+                    vc = await vc_channel.connect(reconnect=True, self_deaf=True)
+                    log.info(f"Reconnected to {vc_channel.name}")
+                    await asyncio.sleep(1)
+                    self._play_next(guild)
+                    return
+                except Exception as e:
+                    log.error(f"Reconnect failed: {e}")
+                    return
 
     async def _play_fresh(self, guild: discord.Guild, track: dict):
         """Re-fetch a fresh stream URL before playing."""
