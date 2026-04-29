@@ -229,12 +229,13 @@ class MusicCog(commands.Cog, name="Music"):
             await interaction.edit_original_response(content="❌ Couldn't find that song.")
             return
 
-        # Connect to voice after search
+        # Connect to voice after search — only reconnect if needed
         vc = guild.voice_client
         try:
-            if vc and vc.is_connected():
-                if vc.channel != vc_channel:
-                    await vc.move_to(vc_channel)
+            if vc and vc.is_connected() and vc.channel == vc_channel:
+                pass  # Already in the right channel, don't reconnect
+            elif vc and vc.is_connected() and vc.channel != vc_channel:
+                await vc.move_to(vc_channel)
             else:
                 if vc:
                     await vc.disconnect(force=True)
