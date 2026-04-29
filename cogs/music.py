@@ -350,6 +350,108 @@ class MusicCog(commands.Cog, name="Music"):
         state.loop = not state.loop
         await interaction.response.send_message(f"🔁 Loop **{'on' if state.loop else 'off'}**.")
 
+    @app_commands.command(name="shuffle", description="Shuffle the queue 🔀")
+    async def slash_shuffle(self, interaction: discord.Interaction):
+        state = get_state(interaction.guild.id)
+        if len(state.queue) < 2:
+            await interaction.response.send_message("❌ Need at least 2 songs in queue to shuffle.", ephemeral=True)
+            return
+        import random
+        queue_list = list(state.queue)
+        random.shuffle(queue_list)
+        state.queue = deque(queue_list)
+        await interaction.response.send_message(f"🔀 Shuffled **{len(state.queue)}** songs in the queue!")
+
+    @app_commands.command(name="remove", description="Remove a song from the queue 🗑️")
+    @app_commands.describe(position="Position in queue (1 = first)")
+    async def slash_remove(self, interaction: discord.Interaction, position: int):
+        state = get_state(interaction.guild.id)
+        if not state.queue:
+            await interaction.response.send_message("❌ Queue is empty.", ephemeral=True)
+            return
+        if position < 1 or position > len(state.queue):
+            await interaction.response.send_message(f"❌ Invalid position. Queue has {len(state.queue)} songs.", ephemeral=True)
+            return
+        queue_list = list(state.queue)
+        removed = queue_list.pop(position - 1)
+        state.queue = deque(queue_list)
+        await interaction.response.send_message(f"🗑️ Removed **{removed['title']}** from position #{position}.")
+
+    @app_commands.command(name="clearqueue", description="Clear the entire queue 🧹")
+    async def slash_clearqueue(self, interaction: discord.Interaction):
+        state = get_state(interaction.guild.id)
+        count = len(state.queue)
+        state.queue.clear()
+        await interaction.response.send_message(f"🧹 Cleared **{count}** songs from the queue.")
+
+    @app_commands.command(name="playtop", description="Add a song to the top of the queue ⬆️")
+    @app_commands.describe(query="Song name or URL")
+    async def slash_playtop(self, interaction: discord.Interaction, query: str):
+        await interaction.response.defer(thinking=True)
+        if not interaction.user.voice:
+            await interaction.followup.send("❌ Join a voice channel first!", ephemeral=True)
+            return
+
+        await interaction.followup.send(f"🔍 Searching for **{query}**...")
+        try:
+            track = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, search_youtube, query),
+                timeout=45.0,
+            )
+        except asyncio.TimeoutError:
+            await interaction.edit_original_response(content="❌ Search timed out.")
+            return
+
+        if not track:
+            await interaction.edit_original_response(content="❌ Couldn't find that song.")
+            return
+
+        state = get_state(interaction.guild.id)
+        track["_fresh"] = True
+        state.queue.appendleft(track)  # Add to front of queue
+
+        vc = interaction.guild.voice_client
+        if not vc or not vc.is_connected():
+            vc_channel = interaction.user.voice.channel
+            vc = await vc_channel.connect(reconnect=True)
+
+        if not vc.is_playing() and not vc.is_paused():
+            self._play_next(interaction.guild)
+
+        await interaction.edit_original_response(content=None, embed=discord.Embed(
+            title="⬆️ Added to Top of Queue",
+            description=f"**[{track['title']}]({track['webpage']})**",
+            color=0xFF4500,
+        ).add_field(name="⏱️ Duration", value=fmt_duration(track["duration"]), inline=True)
+         .add_field(name="🎵 Source", value=track.get("source", "?"), inline=True))
+
+    @app_commands.command(name="replay", description="Replay the current song 🔄")
+    async def slash_replay(self, interaction: discord.Interaction):
+        state = get_state(interaction.guild.id)
+        vc = interaction.guild.voice_client
+        if not state.current:
+            await interaction.response.send_message("❌ Nothing is playing.", ephemeral=True)
+            return
+        # Re-add current song to front of queue and skip
+        track = dict(state.current)
+        track.pop("_fresh", None)  # Force re-fetch
+        state.queue.appendleft(track)
+        if vc and vc.is_playing():
+            vc.stop()
+        await interaction.response.send_message("🔄 Replaying current song!")
+
+    @app_commands.command(name="disconnect", description="Disconnect the bot from voice 👋")
+    async def slash_disconnect(self, interaction: discord.Interaction):
+        vc = interaction.guild.voice_client
+        if not vc:
+            await interaction.response.send_message("❌ Not in a voice channel.", ephemeral=True)
+            return
+        state = get_state(interaction.guild.id)
+        state.queue.clear()
+        state.current = None
+        await vc.disconnect()
+        await interaction.response.send_message("👋 Disconnected.")
+
     @app_commands.command(name="musicstatus", description="Music bot status 🎵")
     async def slash_musicstatus(self, interaction: discord.Interaction):
         import psutil, platform, time
