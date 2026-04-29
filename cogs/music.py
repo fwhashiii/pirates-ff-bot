@@ -109,7 +109,7 @@ class GuildMusic:
     def __init__(self):
         self.queue:   deque[dict] = deque()
         self.current: dict | None = None
-        self.volume:  float = 0.5
+        self.volume:  float = 1.0  # Default 100%
         self.loop:    bool  = False
 
 
@@ -154,11 +154,13 @@ class MusicCog(commands.Cog, name="Music"):
             return
 
         try:
+            # Apply volume boost via FFmpeg filter (supports >100%)
+            vol = getattr(state, 'ffmpeg_volume', 1.5)  # Default 150% for louder output
             source = discord.FFmpegPCMAudio(
                 track["url"],
                 executable=FFMPEG_PATH,
                 before_options="-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
-                options="-vn -ar 48000 -ac 2 -f s16le",
+                options=f"-vn -ar 48000 -ac 2 -f s16le -af volume={vol}",
             )
             source = discord.PCMVolumeTransformer(source, volume=state.volume)
 
@@ -357,16 +359,18 @@ class MusicCog(commands.Cog, name="Music"):
         embed.add_field(name="📺 Channel", value=t["uploader"], inline=True)
         await interaction.response.send_message(embed=embed)
 
-    @app_commands.command(name="volume", description="Set volume 🔊")
-    @app_commands.describe(level="1–100")
+    @app_commands.command(name="volume", description="Set volume 🔊 (1-200%)")
+    @app_commands.describe(level="Volume level 1–200 (default 150)")
     async def slash_volume(self, interaction: discord.Interaction, level: int):
-        level = max(1, min(level, 100))
+        level = max(1, min(level, 200))
         state = get_state(interaction.guild.id)
         state.volume = level / 100
+        state.ffmpeg_volume = level / 100
         vc = interaction.guild.voice_client
         if vc and vc.source:
             vc.source.volume = state.volume
-        await interaction.response.send_message(f"🔊 Volume: **{level}%**")
+        bar = "█" * (level // 20) + "░" * (10 - level // 20)
+        await interaction.response.send_message(f"🔊 Volume: **{level}%** `{bar}`")
 
     @app_commands.command(name="loop", description="Toggle loop 🔁")
     async def slash_loop(self, interaction: discord.Interaction):
