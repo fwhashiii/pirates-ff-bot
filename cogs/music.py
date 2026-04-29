@@ -174,26 +174,6 @@ class MusicCog(commands.Cog, name="Music"):
         if vc and not vc.is_playing() and not state.queue:
             await vc.disconnect()
 
-    @commands.Cog.listener()
-    async def on_voice_state_update(self, member: discord.Member, before: discord.VoiceState, after: discord.VoiceState):
-        """When a new user joins the VC the bot is in, resync audio by restarting the stream."""
-        if member.bot:
-            return
-        guild = member.guild
-        vc = guild.voice_client
-        if not vc or not vc.is_connected():
-            return
-        # Someone joined the channel the bot is in
-        if after.channel and after.channel == vc.channel and not before.channel:
-            # Small delay to let Discord settle
-            await asyncio.sleep(2)
-            # Restart current track to resync audio for the new joiner
-            if vc.is_playing():
-                state = get_state(guild.id)
-                if state.current:
-                    log.info(f"Resyncing audio for {member.display_name} joining {after.channel.name}")
-                    vc.stop()  # This triggers _after_track → _play_next with same track if loop, or next
-
     @app_commands.command(name="play", description="Play a song 🎵")
     @app_commands.describe(query="Song name or URL")
     async def slash_play(self, interaction: discord.Interaction, query: str):
