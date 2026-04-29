@@ -143,6 +143,13 @@ class MusicCog(commands.Cog, name="Music"):
             state.current = None
             return
 
+        # Re-fetch fresh URL if track has a webpage URL (stream URLs expire)
+        if track.get("webpage") and not track.get("_fresh"):
+            asyncio.run_coroutine_threadsafe(
+                self._play_fresh(guild, track), self.bot.loop
+            )
+            return
+
         try:
             source = discord.FFmpegPCMAudio(
                 track["url"],
@@ -162,6 +169,27 @@ class MusicCog(commands.Cog, name="Music"):
         except Exception as e:
             log.error(f"Failed to start playback: {e}")
             asyncio.run_coroutine_threadsafe(self._after_track(guild), self.bot.loop)
+
+    async def _play_fresh(self, guild: discord.Guild, track: dict):
+        """Re-fetch a fresh stream URL before playing."""
+        query = track.get("webpage") or track.get("title", "")
+        log.info(f"Re-fetching fresh URL for: {track['title'][:60]}")
+        try:
+            fresh = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, search_youtube, query),
+                timeout=30.0,
+            )
+            if fresh:
+                fresh["_fresh"] = True
+                state = get_state(guild.id)
+                state.current = fresh
+                self._play_next(guild)
+            else:
+                log.error("Failed to re-fetch URL, skipping track")
+                await self._after_track(guild)
+        except Exception as e:
+            log.error(f"Re-fetch error: {e}")
+            await self._after_track(guild)
 
     async def _after_track(self, guild: discord.Guild):
         await asyncio.sleep(0.5)
@@ -217,6 +245,7 @@ class MusicCog(commands.Cog, name="Music"):
             return
 
         state = get_state(guild.id)
+        track["_fresh"] = True  # URL just fetched, use directly
         state.queue.append(track)
 
         if not vc.is_playing() and not vc.is_paused():
