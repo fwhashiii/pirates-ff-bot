@@ -56,6 +56,9 @@ COGS = [
     "cogs.polls",
     "cogs.leaderboard",
     "cogs.stats_dashboard",
+    "cogs.roles",
+    "cogs.tournaments",
+    "cogs.clips",
 ]
 
 
