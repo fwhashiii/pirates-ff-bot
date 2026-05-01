@@ -59,6 +59,7 @@ COGS = [
     "cogs.roles",
     "cogs.tournaments",
     "cogs.clips",
+    "cogs.antiraid",
 ]
 
 
