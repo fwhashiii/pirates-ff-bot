@@ -53,6 +53,9 @@ COGS = [
     "cogs.sensitivity",
     "cogs.translate",
     "cogs.tickets",
+    "cogs.polls",
+    "cogs.leaderboard",
+    "cogs.stats_dashboard",
 ]
 
 
