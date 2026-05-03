@@ -84,7 +84,7 @@ async def on_ready():
                 pass
 
     try:
-        guild_id = int(os.getenv("GUILD_ID", 0))
+        guild_id = int(os.getenv("DISCORD_GUILD_ID", 0))
         if guild_id:
             guild = discord.Object(id=guild_id)
             bot.tree.copy_global_to(guild=guild)

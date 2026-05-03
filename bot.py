@@ -90,7 +90,7 @@ async def on_ready():
         )
     )
     try:
-        guild = discord.Object(id=int(os.getenv("GUILD_ID", 0)))
+        guild = discord.Object(id=int(os.getenv("DISCORD_GUILD_ID", 0)))
         bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
         log.info(f"Synced {len(synced)} slash command(s) to guild instantly.")
@@ -127,7 +127,7 @@ async def daily_status():
     import psutil, time
     try:
         owner = await bot.fetch_user(OWNER_ID)
-        guild_id = int(os.getenv("GUILD_ID", 0))
+        guild_id = int(os.getenv("DISCORD_GUILD_ID", 0))
         guild = bot.get_guild(guild_id)
 
         latency = round(bot.latency * 1000)
@@ -174,7 +174,7 @@ async def prefix_sync(ctx):
     if ctx.author.id != OWNER_ID:
         return
     try:
-        guild = discord.Object(id=int(os.getenv("GUILD_ID", 0)))
+        guild = discord.Object(id=int(os.getenv("DISCORD_GUILD_ID", 0)))
         bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
         await ctx.send(f"✅ Synced {len(synced)} command(s) to guild.")
