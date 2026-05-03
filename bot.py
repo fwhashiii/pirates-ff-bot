@@ -168,6 +168,22 @@ async def on_resumed():
     await notify_owner("🔄 **Bot reconnected** after a disconnect.", color=0xFFD700)
 
 
+@bot.command(name="sync")
+async def prefix_sync(ctx):
+    """Owner-only: force re-sync slash commands to the guild."""
+    if ctx.author.id != OWNER_ID:
+        return
+    try:
+        guild = discord.Object(id=int(os.getenv("GUILD_ID", 0)))
+        bot.tree.copy_global_to(guild=guild)
+        synced = await bot.tree.sync(guild=guild)
+        await ctx.send(f"✅ Synced {len(synced)} command(s) to guild.")
+        log.info(f"Manual sync: {len(synced)} commands synced by {ctx.author}")
+    except Exception as e:
+        await ctx.send(f"❌ Sync failed: {e}")
+        log.error(f"Manual sync failed: {e}")
+
+
 @bot.event
 async def on_command_error(ctx, error):
     if isinstance(error, commands.CommandNotFound):
