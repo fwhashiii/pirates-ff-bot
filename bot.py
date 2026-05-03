@@ -59,6 +59,7 @@ COGS = [
     "cogs.clips",
     "cogs.antiraid",
     "cogs.growth",
+    "cogs.temp_vc_access",
 ]
 
 
