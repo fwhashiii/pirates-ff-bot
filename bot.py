@@ -93,9 +93,6 @@ async def on_ready():
         bot.tree.copy_global_to(guild=guild)
         synced = await bot.tree.sync(guild=guild)
         log.info(f"Synced {len(synced)} slash command(s) to guild instantly.")
-        # Also sync globally to clear old global commands
-        await bot.tree.sync()
-        log.info("Global sync complete.")
     except Exception as e:
         log.error(f"Failed to sync commands: {e}")
 

@@ -131,7 +131,7 @@ class LeaderboardCog(commands.Cog, name="Leaderboard"):
                     _add_xp(gid, member.id, minutes * XP_PER_VC_MINUTE)
 
     # ── /rank ─────────────────────────────────────────────
-    @app_commands.command(name="rank", description="Check your rank and XP 🏅")
+    @app_commands.command(name="xprank", description="Check your XP rank and level 🏅")
     @app_commands.describe(member="Member to check (default: yourself)")
     async def slash_rank(self, interaction: discord.Interaction, member: discord.Member = None):
         target = member or interaction.user
