@@ -693,5 +693,184 @@ class MusicCog(commands.Cog, name="Music"):
         await interaction.response.send_message(embed=embed)
 
 
+    @app_commands.command(name="artist", description="Find all songs by an artist and queue them 🎤")
+    @app_commands.describe(
+        artist="Artist name to search for",
+        limit="How many songs to load (default: 10, max: 25)",
+    )
+    async def slash_artist(self, interaction: discord.Interaction, artist: str, limit: int = 10):
+        await interaction.response.defer(thinking=True)
+
+        if not interaction.user.voice:
+            await interaction.followup.send("❌ Join a voice channel first!", ephemeral=True)
+            return
+
+        limit = max(1, min(limit, 25))
+
+        await interaction.followup.send(f"🔍 Searching for songs by **{artist}**...")
+
+        def fetch_artist_songs(name: str, count: int) -> list[dict]:
+            results = []
+            opts = {
+                "format": "bestaudio/best",
+                "noplaylist": True,
+                "quiet": True,
+                "no_warnings": True,
+                "source_address": "0.0.0.0",
+                "socket_timeout": 30,
+            }
+
+            # Try SoundCloud first
+            sc_opts = {**opts}
+            try:
+                with yt_dlp.YoutubeDL(sc_opts) as ydl:
+                    info = ydl.extract_info(f"scsearch{count}:{name}", download=False)
+                    if info and "entries" in info:
+                        for e in info["entries"]:
+                            if e and len(results) < count:
+                                results.append({
+                                    "title":     e.get("title", "Unknown"),
+                                    "duration":  e.get("duration", 0) or 0,
+                                    "webpage":   e.get("webpage_url", ""),
+                                    "uploader":  e.get("uploader", "Unknown"),
+                                    "url":       e.get("url", ""),
+                                    "thumbnail": e.get("thumbnail", ""),
+                                    "source":    "SoundCloud",
+                                    "_fresh":    True,
+                                })
+            except Exception as e:
+                log.warning(f"SoundCloud artist search failed: {e}")
+
+            # Fill remaining from YouTube
+            remaining = count - len(results)
+            if remaining > 0:
+                yt_opts = {
+                    **opts,
+                    "extractor_args": {"youtube": {"player_client": ["android"]}},
+                    "http_headers": {"User-Agent": "com.google.android.youtube/17.36.4 (Linux; U; Android 12; GB) gzip"},
+                }
+                if COOKIE_FILE:
+                    yt_opts["cookiefile"] = COOKIE_FILE
+                try:
+                    with yt_dlp.YoutubeDL(yt_opts) as ydl:
+                        info = ydl.extract_info(f"ytsearch{remaining}:{name} songs", download=False)
+                        if info and "entries" in info:
+                            for e in info["entries"]:
+                                if e and len(results) < count:
+                                    results.append({
+                                        "title":     e.get("title", "Unknown"),
+                                        "duration":  e.get("duration", 0) or 0,
+                                        "webpage":   e.get("webpage_url", ""),
+                                        "uploader":  e.get("uploader", "Unknown"),
+                                        "url":       e.get("url", ""),
+                                        "thumbnail": e.get("thumbnail", ""),
+                                        "source":    "YouTube",
+                                        "_fresh":    True,
+                                    })
+                except Exception as e:
+                    log.warning(f"YouTube artist search failed: {e}")
+
+            return results
+
+        try:
+            songs = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, fetch_artist_songs, artist, limit),
+                timeout=45.0,
+            )
+        except asyncio.TimeoutError:
+            await interaction.edit_original_response(content="❌ Search timed out. Try a smaller limit.")
+            return
+
+        if not songs:
+            await interaction.edit_original_response(content=f"❌ No songs found for **{artist}**.")
+            return
+
+        # Build results embed
+        embed = discord.Embed(
+            title=f"🎤 Songs by: {artist}",
+            description=f"Found **{len(songs)}** songs. Reply with:\n• A number (e.g. `3`) to queue one song\n• `all` to queue all songs\n• `cancel` to dismiss",
+            color=0xFF4500,
+            timestamp=datetime.now(),
+        )
+        for i, s in enumerate(songs, 1):
+            embed.add_field(
+                name=f"{i}. {s['title'][:50]}",
+                value=f"⏱️ {fmt_duration(s['duration'])} • 🎵 {s['source']}",
+                inline=False,
+            )
+        embed.set_footer(text=f"Reply within 45 seconds • PIRATES Music")
+
+        await interaction.edit_original_response(content=None, embed=embed)
+
+        def check(m):
+            return (
+                m.author == interaction.user
+                and m.channel.id == interaction.channel_id
+                and (
+                    m.content.strip().lower() in ["all", "cancel"]
+                    or m.content.strip().isdigit()
+                )
+            )
+
+        try:
+            msg = await self.bot.wait_for("message", check=check, timeout=45.0)
+            reply = msg.content.strip().lower()
+            await msg.delete()
+        except asyncio.TimeoutError:
+            await interaction.edit_original_response(content="⏰ Timed out — no selection made.", embed=None)
+            return
+
+        if reply == "cancel":
+            await interaction.edit_original_response(content="❌ Cancelled.", embed=None)
+            return
+
+        # Connect to VC
+        vc = interaction.guild.voice_client
+        vc_channel = interaction.user.voice.channel
+        try:
+            if vc and vc.is_connected():
+                if vc.channel != vc_channel:
+                    await vc.move_to(vc_channel)
+            else:
+                if vc:
+                    await vc.disconnect(force=True)
+                vc = await vc_channel.connect(reconnect=True)
+        except Exception as e:
+            await interaction.edit_original_response(content=f"❌ Voice error: {e}", embed=None)
+            return
+
+        state = get_state(interaction.guild.id)
+
+        if reply == "all":
+            for s in songs:
+                state.queue.append(s)
+            if not vc.is_playing() and not vc.is_paused():
+                self._play_next(interaction.guild)
+            result_embed = discord.Embed(
+                title=f"🎤 Queued {len(songs)} songs by {artist}",
+                description="\n".join(f"`{i}.` {s['title'][:60]}" for i, s in enumerate(songs, 1)),
+                color=0x00FF7F,
+            )
+            result_embed.set_footer(text=f"PIRATES Music • {len(songs)} songs added")
+            await interaction.edit_original_response(content=None, embed=result_embed)
+        else:
+            idx = int(reply) - 1
+            if idx < 0 or idx >= len(songs):
+                await interaction.edit_original_response(content="❌ Invalid number.", embed=None)
+                return
+            track = songs[idx]
+            state.queue.append(track)
+            if not vc.is_playing() and not vc.is_paused():
+                self._play_next(interaction.guild)
+            result_embed = discord.Embed(
+                title="🎵 Added to Queue",
+                description=f"**[{track['title']}]({track['webpage']})**",
+                color=0xFF4500,
+            )
+            result_embed.add_field(name="⏱️ Duration", value=fmt_duration(track["duration"]), inline=True)
+            result_embed.add_field(name="🎵 Source",   value=track["source"],                 inline=True)
+            await interaction.edit_original_response(content=None, embed=result_embed)
+
+
 async def setup(bot: commands.Bot):
     await bot.add_cog(MusicCog(bot))
