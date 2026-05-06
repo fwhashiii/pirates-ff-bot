@@ -225,19 +225,23 @@ class OpenTicketView(ui.View):
         custom_id="open_ticket_btn",
     )
     async def open_ticket(self, interaction: discord.Interaction, button: ui.Button):
-        # Show category selection as ephemeral message with select
-        embed = discord.Embed(
-            title="Select a Category",
-            description=(
-                "**report** — Report a member\n"
-                "**appeal** — Appeal a mute/ban\n"
-                "**staffapp** — Staff application\n"
-                "**suggest** — Server suggestion\n"
-                "**general** — General help"
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                title="Select a Category",
+                description=(
+                    "**report** — Report a member\n"
+                    "**appeal** — Appeal a mute/ban\n"
+                    "**staffapp** — Staff application\n"
+                    "**suggest** — Server suggestion\n"
+                    "**privatevc** — Private VC request\n"
+                    "**general** — General help"
+                ),
+                color=0xFF4500,
             ),
-            color=0xFF4500,
+            view=CategorySelectView(),
+            ephemeral=True,
+            delete_after=60,
         )
-        await interaction.response.send_message(embed=embed, view=CategorySelectView(), ephemeral=True)
 
 
 class CategorySelectView(ui.View):
@@ -492,13 +496,8 @@ class TicketsCog(commands.Cog, name="Tickets"):
             if not support_ch:
                 continue
 
-            # Only post if no panel exists yet
-            history = [m async for m in support_ch.history(limit=5)]
-            for msg in history:
-                if msg.author == self.bot.user and msg.components:
-                    return  # already posted
-
-            await support_ch.purge(limit=10, check=lambda m: m.author == self.bot.user)
+            # Delete ALL old bot messages and repost a single clean panel
+            await support_ch.purge(limit=50, check=lambda m: m.author == self.bot.user)
 
             embed = discord.Embed(
                 title="🎫 PIRATES Support Center",
