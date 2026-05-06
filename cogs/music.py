@@ -153,6 +153,13 @@ class MusicCog(commands.Cog, name="Music"):
             )
             return
 
+        # Search for Spotify tracks on-demand
+        if track.get("_search_query") and not track.get("url"):
+            asyncio.run_coroutine_threadsafe(
+                self._play_fresh(guild, track), self.bot.loop
+            )
+            return
+
         try:
             # Apply volume boost via FFmpeg filter (supports >100%)
             vol = getattr(state, 'ffmpeg_volume', 1.5)  # Default 150% for louder output
@@ -197,7 +204,7 @@ class MusicCog(commands.Cog, name="Music"):
 
     async def _play_fresh(self, guild: discord.Guild, track: dict):
         """Re-fetch a fresh stream URL before playing."""
-        query = track.get("webpage") or track.get("title", "")
+        query = track.get("_search_query") or track.get("webpage") or track.get("title", "")
         log.info(f"Re-fetching fresh URL for: {track['title'][:60]}")
         try:
             fresh = await asyncio.wait_for(
@@ -870,6 +877,192 @@ class MusicCog(commands.Cog, name="Music"):
             result_embed.add_field(name="⏱️ Duration", value=fmt_duration(track["duration"]), inline=True)
             result_embed.add_field(name="🎵 Source",   value=track["source"],                 inline=True)
             await interaction.edit_original_response(content=None, embed=result_embed)
+
+
+    @app_commands.command(name="spotify", description="Import a Spotify playlist and queue all songs 🎧")
+    @app_commands.describe(
+        url="Spotify playlist URL (e.g. https://open.spotify.com/playlist/...)",
+        limit="Max songs to queue (default: 25, max: 50)",
+    )
+    async def slash_spotify(self, interaction: discord.Interaction, url: str, limit: int = 25):
+        await interaction.response.defer(thinking=True)
+
+        if not interaction.user.voice:
+            await interaction.followup.send("❌ Join a voice channel first!", ephemeral=True)
+            return
+
+        limit = max(1, min(limit, 50))
+
+        # Extract playlist ID from URL
+        import re
+        match = re.search(r"playlist/([A-Za-z0-9]+)", url)
+        if not match:
+            await interaction.followup.send(
+                "❌ Invalid Spotify URL. Use a playlist link like:\n"
+                "`https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M`",
+                ephemeral=True,
+            )
+            return
+
+        playlist_id = match.group(1)
+
+        await interaction.followup.send("🎧 Fetching Spotify playlist...")
+
+        # Get Spotify access token (client credentials flow — no user login needed)
+        def get_spotify_token() -> str | None:
+            client_id     = os.getenv("SPOTIFY_CLIENT_ID", "")
+            client_secret = os.getenv("SPOTIFY_CLIENT_SECRET", "")
+            if not client_id or not client_secret:
+                return None
+            import base64
+            import urllib.request, urllib.parse
+            credentials = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode()
+            data = urllib.parse.urlencode({"grant_type": "client_credentials"}).encode()
+            req = urllib.request.Request(
+                "https://accounts.spotify.com/api/token",
+                data=data,
+                headers={"Authorization": f"Basic {credentials}", "Content-Type": "application/x-www-form-urlencoded"},
+            )
+            try:
+                import json
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return json.loads(resp.read()).get("access_token")
+            except Exception as e:
+                log.error(f"Spotify token error: {e}")
+                return None
+
+        def fetch_spotify_tracks(pid: str, max_tracks: int) -> tuple[list[str], str, str]:
+            """Returns (track_queries, playlist_name, playlist_thumbnail)"""
+            import urllib.request, json
+            token = get_spotify_token()
+            if not token:
+                return [], "", ""
+
+            tracks = []
+            playlist_name = "Spotify Playlist"
+            thumbnail = ""
+            offset = 0
+
+            # Get playlist info first
+            try:
+                req = urllib.request.Request(
+                    f"https://api.spotify.com/v1/playlists/{pid}?fields=name,images",
+                    headers={"Authorization": f"Bearer {token}"},
+                )
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read())
+                    playlist_name = data.get("name", "Spotify Playlist")
+                    images = data.get("images", [])
+                    if images:
+                        thumbnail = images[0].get("url", "")
+            except Exception as e:
+                log.warning(f"Spotify playlist info error: {e}")
+
+            # Fetch tracks
+            while len(tracks) < max_tracks:
+                batch = min(50, max_tracks - len(tracks))
+                try:
+                    req = urllib.request.Request(
+                        f"https://api.spotify.com/v1/playlists/{pid}/tracks"
+                        f"?limit={batch}&offset={offset}&fields=items(track(name,artists,duration_ms)),next",
+                        headers={"Authorization": f"Bearer {token}"},
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        data = json.loads(resp.read())
+                    items = data.get("items", [])
+                    if not items:
+                        break
+                    for item in items:
+                        track = item.get("track")
+                        if not track:
+                            continue
+                        name    = track.get("name", "")
+                        artists = ", ".join(a["name"] for a in track.get("artists", []))
+                        if name:
+                            tracks.append(f"{artists} - {name}" if artists else name)
+                    if not data.get("next"):
+                        break
+                    offset += batch
+                except Exception as e:
+                    log.error(f"Spotify tracks fetch error: {e}")
+                    break
+
+            return tracks[:max_tracks], playlist_name, thumbnail
+
+        try:
+            track_queries, playlist_name, thumbnail = await asyncio.wait_for(
+                asyncio.get_event_loop().run_in_executor(None, fetch_spotify_tracks, playlist_id, limit),
+                timeout=20.0,
+            )
+        except asyncio.TimeoutError:
+            await interaction.edit_original_response(content="❌ Spotify request timed out.")
+            return
+
+        if not track_queries:
+            # Check if credentials are missing
+            if not os.getenv("SPOTIFY_CLIENT_ID"):
+                await interaction.edit_original_response(
+                    content="❌ Spotify credentials not configured.\n"
+                            "Add `SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` to your Railway variables.\n"
+                            "Get them free at: https://developer.spotify.com/dashboard"
+                )
+            else:
+                await interaction.edit_original_response(content="❌ Couldn't fetch tracks from that playlist.")
+            return
+
+        await interaction.edit_original_response(
+            content=f"🎧 Found **{len(track_queries)}** tracks in **{playlist_name}**. Queuing now..."
+        )
+
+        # Connect to VC
+        vc = interaction.guild.voice_client
+        vc_channel = interaction.user.voice.channel
+        try:
+            if vc and vc.is_connected():
+                if vc.channel != vc_channel:
+                    await vc.move_to(vc_channel)
+            else:
+                if vc:
+                    await vc.disconnect(force=True)
+                vc = await vc_channel.connect(reconnect=True)
+        except Exception as e:
+            await interaction.edit_original_response(content=f"❌ Voice error: {e}")
+            return
+
+        state = get_state(interaction.guild.id)
+
+        # Queue all tracks as lightweight entries (search on-demand when played)
+        queued = 0
+        for query in track_queries:
+            state.queue.append({
+                "title":    query,
+                "duration": 0,
+                "webpage":  "",
+                "thumbnail": "",
+                "uploader": "Spotify",
+                "source":   "Spotify→YouTube",
+                "url":      "",
+                "_search_query": query,  # Will be searched when played
+            })
+            queued += 1
+
+        if not vc.is_playing() and not vc.is_paused():
+            self._play_next(interaction.guild)
+
+        result_embed = discord.Embed(
+            title=f"🎧 Spotify Playlist Queued",
+            description=f"**{playlist_name}**\n\n" +
+                        "\n".join(f"`{i}.` {q[:60]}" for i, q in enumerate(track_queries[:15], 1)) +
+                        (f"\n*...and {len(track_queries) - 15} more*" if len(track_queries) > 15 else ""),
+            color=0x1DB954,  # Spotify green
+            timestamp=datetime.utcnow(),
+        )
+        if thumbnail:
+            result_embed.set_thumbnail(url=thumbnail)
+        result_embed.add_field(name="🎵 Songs queued", value=str(queued), inline=True)
+        result_embed.add_field(name="📋 Queue size",   value=str(len(state.queue)), inline=True)
+        result_embed.set_footer(text=f"Requested by {interaction.user.display_name} • PIRATES Music")
+        await interaction.edit_original_response(content=None, embed=result_embed)
 
 
 async def setup(bot: commands.Bot):
