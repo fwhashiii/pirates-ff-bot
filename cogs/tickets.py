@@ -153,21 +153,18 @@ async def create_ticket(interaction: discord.Interaction, category_key: str):
             await ticket_ch.send(embed=vc_embed, view=PrivateVCApprovalView(member.id))
 
             # Send email notification in background
-            import threading
-            threading.Thread(
-                target=send_email_notification,
-                args=(
-                    f"🎙️ Private VC Request — {member.display_name}",
-                    f"User: {member} (ID: {member.id})\n"
-                    f"Server: {guild.name}\n"
-                    f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n\n"
-                    f"They have opened a private VC request ticket.\n"
-                    f"Ticket channel: #{ticket_ch.name}\n\n"
-                    f"Login to Discord to approve or deny.",
-                ),
-                daemon=True,
-            ).start()
-
+            loop = asyncio.get_event_loop()
+            loop.run_in_executor(
+                None,
+                send_email_notification,
+                f"🎙️ Private VC Request — {member.display_name}",
+                f"User: {member} (ID: {member.id})\n"
+                f"Server: {guild.name}\n"
+                f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC\n\n"
+                f"They have opened a private VC request ticket.\n"
+                f"Ticket channel: #{ticket_ch.name}\n\n"
+                f"Login to Discord to approve or deny.",
+            )
         await interaction.edit_original_response(content=f"✅ Ticket created: {ticket_ch.mention}")
 
         log_ch_id = int(os.getenv("LOG_CHANNEL_ID", 0))
