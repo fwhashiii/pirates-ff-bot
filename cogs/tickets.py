@@ -214,6 +214,28 @@ class TicketCategoryModal(ui.Modal, title="Open a Support Ticket"):
         await create_ticket(interaction, val)
 
 
+# ── Ticket category modal (popup — leaves no message in chat) ─
+class TicketCategorySelectModal(ui.Modal, title="🎫 Open a Ticket"):
+    category = ui.TextInput(
+        label="Category",
+        placeholder="report / appeal / staffapp / suggest / privatevc / general",
+        min_length=4,
+        max_length=10,
+        required=True,
+    )
+
+    async def on_submit(self, interaction: discord.Interaction):
+        val = self.category.value.strip().lower()
+        valid = {v[0] for v in TICKET_CATEGORIES.values()}
+        if val not in valid:
+            await interaction.response.send_message(
+                f"❌ Invalid. Use one of: `{'`, `'.join(valid)}`", ephemeral=True
+            )
+            return
+        await interaction.response.send_message("🎫 Creating your ticket...", ephemeral=True)
+        await create_ticket(interaction, val)
+
+
 # ── Open Ticket button ────────────────────────────────────
 class OpenTicketView(ui.View):
     def __init__(self):
@@ -225,23 +247,7 @@ class OpenTicketView(ui.View):
         custom_id="open_ticket_btn",
     )
     async def open_ticket(self, interaction: discord.Interaction, button: ui.Button):
-        await interaction.response.send_message(
-            embed=discord.Embed(
-                title="Select a Category",
-                description=(
-                    "**report** — Report a member\n"
-                    "**appeal** — Appeal a mute/ban\n"
-                    "**staffapp** — Staff application\n"
-                    "**suggest** — Server suggestion\n"
-                    "**privatevc** — Private VC request\n"
-                    "**general** — General help"
-                ),
-                color=0xFF4500,
-            ),
-            view=CategorySelectView(),
-            ephemeral=True,
-            delete_after=60,
-        )
+        await interaction.response.send_modal(TicketCategorySelectModal())
 
 
 class CategorySelectView(ui.View):
