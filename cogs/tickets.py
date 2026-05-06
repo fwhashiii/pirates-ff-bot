@@ -65,6 +65,15 @@ def send_email_notification(subject: str, body: str):
         log.error(f"❌ Email failed: {e}")
 
 
+async def _send_email_async(subject: str, body: str):
+    """Run email sending in a thread executor so it doesn't block the event loop."""
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, send_email_notification, subject, body)
+    except Exception as e:
+        log.error(f"❌ Async email wrapper failed: {e}")
+
+
 async def create_ticket(interaction: discord.Interaction, category_key: str):
     """Core ticket creation — called once per interaction."""
     member = interaction.user
@@ -152,11 +161,8 @@ async def create_ticket(interaction: discord.Interaction, category_key: str):
             )
             await ticket_ch.send(embed=vc_embed, view=PrivateVCApprovalView(member.id))
 
-            # Send email notification in background
-            loop = asyncio.get_event_loop()
-            loop.run_in_executor(
-                None,
-                send_email_notification,
+            # Send email notification async
+            asyncio.create_task(_send_email_async(
                 f"🎙️ Private VC Request — {member.display_name}",
                 f"User: {member} (ID: {member.id})\n"
                 f"Server: {guild.name}\n"
@@ -164,7 +170,7 @@ async def create_ticket(interaction: discord.Interaction, category_key: str):
                 f"They have opened a private VC request ticket.\n"
                 f"Ticket channel: #{ticket_ch.name}\n\n"
                 f"Login to Discord to approve or deny.",
-            )
+            ))
         await interaction.edit_original_response(content=f"✅ Ticket created: {ticket_ch.mention}")
 
         log_ch_id = int(os.getenv("LOG_CHANNEL_ID", 0))
