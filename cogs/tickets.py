@@ -339,9 +339,10 @@ class PrivateVCApprovalView(ui.View):
 
         vc = await guild.create_voice_channel(vc_name, category=pvc_cat, overwrites=overwrites)
 
-        # Disable buttons
+        # Disable only approve/deny buttons, keep add member active
         for child in self.children:
-            child.disabled = True
+            if child.custom_id in ("pvc_approve", "pvc_deny"):
+                child.disabled = True
         await interaction.message.edit(view=self)
 
         confirm_embed = discord.Embed(
