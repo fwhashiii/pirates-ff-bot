@@ -31,14 +31,16 @@ TICKET_CATEGORIES = {
 
 def send_email_notification(subject: str, body: str):
     """Send an email notification to the owner via SMTP."""
-    smtp_host  = os.getenv("SMTP_HOST", "smtp.gmail.com")
-    smtp_port  = int(os.getenv("SMTP_PORT", 587))
-    smtp_user  = os.getenv("SMTP_USER", "")
-    smtp_pass  = os.getenv("SMTP_PASS", "")
+    smtp_host   = os.getenv("SMTP_HOST", "smtp.gmail.com")
+    smtp_port   = int(os.getenv("SMTP_PORT", 587))
+    smtp_user   = os.getenv("SMTP_USER", "")
+    smtp_pass   = os.getenv("SMTP_PASS", "")
     owner_email = os.getenv("OWNER_EMAIL", "")
 
+    log.info(f"Email config — host:{smtp_host} port:{smtp_port} user:{smtp_user} owner:{owner_email} pass_set:{'yes' if smtp_pass else 'NO'}")
+
     if not all([smtp_user, smtp_pass, owner_email]):
-        log.warning("Email not configured — skipping notification")
+        log.warning("Email not configured — skipping notification (check SMTP_USER, SMTP_PASS, OWNER_EMAIL in Railway vars)")
         return
 
     try:
@@ -49,12 +51,18 @@ def send_email_notification(subject: str, body: str):
         msg.attach(MIMEText(body, "plain"))
 
         with smtplib.SMTP(smtp_host, smtp_port) as server:
+            server.ehlo()
             server.starttls()
+            server.ehlo()
             server.login(smtp_user, smtp_pass)
             server.sendmail(smtp_user, owner_email, msg.as_string())
-        log.info(f"Email sent: {subject}")
+        log.info(f"✅ Email sent successfully: {subject}")
+    except smtplib.SMTPAuthenticationError as e:
+        log.error(f"❌ Email auth failed — wrong password or App Password not used: {e}")
+    except smtplib.SMTPException as e:
+        log.error(f"❌ SMTP error: {e}")
     except Exception as e:
-        log.error(f"Failed to send email: {e}")
+        log.error(f"❌ Email failed: {e}")
 
 
 async def create_ticket(interaction: discord.Interaction, category_key: str):
