@@ -1,0 +1,6 @@
+[phases.setup]
+nixPkgs = ["ffmpeg"]
+
+[start]
+cmd = "python bot.py"
+# force redeploy v2
