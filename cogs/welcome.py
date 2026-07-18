@@ -10,18 +10,46 @@ from datetime import datetime
 
 # ── One Piece welcome GIFs ────────────────────────────
 WELCOME_GIFS = [
-    # Luffy laughing / happy
-    "https://media.giphy.com/media/3oEjHGr1Fhz0kyv8Ig/giphy.gif",
-    # Luffy excited fist pump
+    # Free Fire — parachute drop
     "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif",
-    # One Piece crew celebration
+    # Free Fire — squad celebration
     "https://media.giphy.com/media/26BRuo6sLetdllPAQ/giphy.gif",
-    # Luffy big smile
+    # Free Fire — Booyah screen
+    "https://media.giphy.com/media/3oEjHGr1Fhz0kyv8Ig/giphy.gif",
+    # Free Fire — character run
     "https://media.giphy.com/media/xT9IgG50Lg7russbDa/giphy.gif",
-    # Luffy Gear 5 laugh
+    # Hype — crowd celebration
     "https://media.giphy.com/media/077i6AULCXc0FKTj9s/giphy.gif",
-    # One Piece welcome
+    # Hype — fire explosion
     "https://media.giphy.com/media/artj92V8o75VPL7AeQ/giphy.gif",
+    # Welcome — party popper
+    "https://media.giphy.com/media/g9582DNuQppxC/giphy.gif",
+    # Hype — let's go
+    "https://media.giphy.com/media/5GoVLqeAOo6PK/giphy.gif",
+    # Celebration — confetti
+    "https://media.giphy.com/media/26tOZ42Mg6pbTUPHW/giphy.gif",
+    # Gaming — controller hype
+    "https://media.giphy.com/media/LmNwrBhejkK9EFP504/giphy.gif",
+    # Fire — flames
+    "https://media.giphy.com/media/13HgwGsXF0aiGY/giphy.gif",
+    # Squad — fist bump
+    "https://media.giphy.com/media/3o7abKhOpu0NwenH3O/giphy.gif",
+    # Victory — winner
+    "https://media.giphy.com/media/l0MYGb1LuZ3n7dRnO/giphy.gif",
+    # Hype — crowd goes wild
+    "https://media.giphy.com/media/1ofR3QioNy264/giphy.gif",
+    # Welcome — waving
+    "https://media.giphy.com/media/ASd0Ukj0y3qMM/giphy.gif",
+    # Gaming — epic win
+    "https://media.giphy.com/media/26ufdipQqU2lhNA4g/giphy.gif",
+    # Fire — explosion hype
+    "https://media.giphy.com/media/3o7TKSjRrfIPjeiVyM/giphy.gif",
+    # Celebration — dance
+    "https://media.giphy.com/media/l0MYt5jPR6QX5pnqM/giphy.gif",
+    # Squad — ready to fight
+    "https://media.giphy.com/media/xT9IgDECMFBkyLpNjy/giphy.gif",
+    # Hype — insane play
+    "https://media.giphy.com/media/3ohzdIuqJoo8QdKlnW/giphy.gif",
 ]
 
 # ── Welcome messages (rotates) ────────────────────────
@@ -73,6 +101,7 @@ class WelcomeCog(commands.Cog, name="Welcome"):
             return
 
         gif = random.choice(WELCOME_GIFS)
+        dm_gif = random.choice([g for g in WELCOME_GIFS if g != gif])
         title = random.choice(WELCOME_TITLES)
         tagline = random.choice(WELCOME_LINES)
 
@@ -154,7 +183,7 @@ class WelcomeCog(commands.Cog, name="Welcome"):
                 color=0xFF4500,
             )
             dm_embed.set_thumbnail(url=guild.icon.url if guild.icon else member.display_avatar.url)
-            dm_embed.set_image(url=random.choice(WELCOME_GIFS))
+            dm_embed.set_image(url=dm_gif)
 
             dm_embed.add_field(
                 name="📜 Server Rules",
