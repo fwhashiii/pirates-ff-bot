@@ -59,6 +59,7 @@ COGS = [
     "cogs.clips",
     "cogs.antiraid",
     "cogs.growth",
+    "cogs.limited_vc",
 ]
 
 
