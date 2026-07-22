@@ -102,7 +102,12 @@ def search_youtube(query: str) -> dict | None:
                     entries = [info]
 
                 if not entries:
+                    log.warning(f"Strategy {i+1}: No entries returned")
                     continue
+
+                log.info(f"Strategy {i+1}: Found {len(entries)} results")
+                for idx, e in enumerate(entries[:3], 1):
+                    log.info(f"  Result {idx}: {e.get('title', 'Unknown')[:60]}")
 
                 info = pick_best(entries)
                 if not info:
