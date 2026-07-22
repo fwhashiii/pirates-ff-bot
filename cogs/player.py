@@ -1,40 +1,37 @@
 """
-🎮 Player Cog — Stats, LFG, rank roles, and player profiles
+🎮 Player Cog — Real Free Fire stats via HL Gaming Official API
+/stats  /rank  /lfg  /profile  /ffuid  /guild
 """
 
 import discord
 from discord.ext import commands
 from discord import app_commands
 from datetime import datetime
-import random
+import aiohttp
+import os
+import logging
 
+log = logging.getLogger("cog.player")
 
-# Simulated rank data (replace with real API if available)
-FF_RANKS = ["Bronze", "Silver", "Gold", "Platinum", "Diamond",
-            "Master", "Grandmaster", "Heroic"]
+# ── HL Gaming Official API ────────────────────────────────
+FF_API_BASE   = "https://proapis.hlgamingofficial.com/main/games/freefire/account/api"
+FF_STATS_BASE = "https://proapis.hlgamingofficial.com/main/games/freefire/stats/api"
+FF_API_KEY    = os.getenv("FF_API_KEY", "")
+FF_USER_UID   = os.getenv("FF_USER_UID", "")   # Your developer UID from HL Gaming
 
-RANK_ROLE_MAP = {
-    "Bronze":       "🌱 Bronze",
-    "Silver":       "🔰 Silver",
-    "Gold":         "🥉 Gold",
-    "Platinum":     "🥈 Platinum",
-    "Diamond":      "💠 Diamond",
-    "Master":       "🥇 Master",
-    "Grandmaster":  "🏆 Grandmaster",
-    "Heroic":       "💎 Heroic",
-}
+# Supported regions
+REGIONS = ["ind", "sg", "br", "us", "id", "tw", "th", "vn", "me", "pk", "ru", "eu", "na", "sa"]
 
-# Official Free Fire rank badge images
-RANK_IMAGES = {
-    "Bronze":      "https://static.wikia.nocookie.net/freefire/images/5/5b/Bronze.png",
-    "Silver":      "https://static.wikia.nocookie.net/freefire/images/4/4e/Silver.png",
-    "Gold":        "https://static.wikia.nocookie.net/freefire/images/8/8e/Gold.png",
-    "Platinum":    "https://static.wikia.nocookie.net/freefire/images/b/b5/Platinum.png",
-    "Diamond":     "https://static.wikia.nocookie.net/freefire/images/3/3e/Diamond.png",
-    "Master":      "https://static.wikia.nocookie.net/freefire/images/6/6e/Master.png",
-    "Grandmaster": "https://static.wikia.nocookie.net/freefire/images/9/9e/Grandmaster.png",
-    "Heroic":      "https://static.wikia.nocookie.net/freefire/images/2/2e/Heroic.png",
-}
+# Rank point → rank name mapping (BR)
+def br_rank_name(points: int) -> str:
+    if points >= 6000: return "Heroic"
+    if points >= 4800: return "Grandmaster"
+    if points >= 3600: return "Master"
+    if points >= 2400: return "Diamond"
+    if points >= 1200: return "Platinum"
+    if points >= 600:  return "Gold"
+    if points >= 300:  return "Silver"
+    return "Bronze"
 
 RANK_COLORS = {
     "Bronze":      0xCD7F32,
@@ -47,56 +44,227 @@ RANK_COLORS = {
     "Heroic":      0xE91E63,
 }
 
+RANK_IMAGES = {
+    "Bronze":      "https://static.wikia.nocookie.net/freefire/images/5/5b/Bronze.png",
+    "Silver":      "https://static.wikia.nocookie.net/freefire/images/4/4e/Silver.png",
+    "Gold":        "https://static.wikia.nocookie.net/freefire/images/8/8e/Gold.png",
+    "Platinum":    "https://static.wikia.nocookie.net/freefire/images/b/b5/Platinum.png",
+    "Diamond":     "https://static.wikia.nocookie.net/freefire/images/3/3e/Diamond.png",
+    "Master":      "https://static.wikia.nocookie.net/freefire/images/6/6e/Master.png",
+    "Grandmaster": "https://static.wikia.nocookie.net/freefire/images/9/9e/Grandmaster.png",
+    "Heroic":      "https://static.wikia.nocookie.net/freefire/images/2/2e/Heroic.png",
+}
+
+RANK_ROLE_MAP = {
+    "Bronze":       "🌱 Bronze",
+    "Silver":       "🔰 Silver",
+    "Gold":         "🥉 Gold",
+    "Platinum":     "🥈 Platinum",
+    "Diamond":      "💠 Diamond",
+    "Master":       "🥇 Master",
+    "Grandmaster":  "🏆 Grandmaster",
+    "Heroic":       "💎 Heroic",
+}
+
+
+async def fetch_ff_player(uid: str, region: str) -> dict | None:
+    """Fetch full player data from HL Gaming API."""
+    if not FF_API_KEY or not FF_USER_UID:
+        return None
+    params = {
+        "sectionName": "AllData",
+        "PlayerUid":   uid,
+        "region":      region.lower(),
+        "useruid":     FF_USER_UID,
+        "api":         FF_API_KEY,
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(FF_API_BASE, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+    except Exception as e:
+        log.error(f"FF API error: {e}")
+    return None
+
+
+async def fetch_ff_stats(uid: str, region: str) -> dict | None:
+    """Fetch player game stats (solo/duo/squad) from HL Gaming API."""
+    if not FF_API_KEY or not FF_USER_UID:
+        return None
+    params = {
+        "sectionName": "playerStats",
+        "PlayerUid":   uid,
+        "region":      region.lower(),
+        "useruid":     FF_USER_UID,
+        "api":         FF_API_KEY,
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(FF_STATS_BASE, params=params, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+                if resp.status == 200:
+                    return await resp.json()
+    except Exception as e:
+        log.error(f"FF Stats API error: {e}")
+    return None
+
+
+def fmt_num(n) -> str:
+    try:
+        return f"{int(n):,}"
+    except Exception:
+        return str(n)
+
 
 class PlayerCog(commands.Cog, name="Player"):
-    """Player stats, rank roles, and squad finder."""
 
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     # ── /stats ────────────────────────────────────────────
-    @app_commands.command(name="stats", description="Show your Free Fire stats card 📊")
+    @app_commands.command(name="stats", description="Look up real Free Fire stats by UID 📊")
     @app_commands.describe(
-        username="Your Free Fire in-game name",
-        region="Your region (e.g. NA, SEA, SA, IND)"
+        uid="Free Fire player UID",
+        region="Player region (ind, sg, br, us, pk, id, etc.)"
     )
-    async def slash_stats(
-        self,
-        interaction: discord.Interaction,
-        username: str,
-        region: str = "SEA",
-    ):
+    async def slash_stats(self, interaction: discord.Interaction, uid: str, region: str = "sg"):
         await interaction.response.defer()
 
-        # Simulated stats — swap with a real FF stats API if you have one
-        kd     = round(random.uniform(1.0, 8.5), 2)
-        wins   = random.randint(50, 3000)
-        games  = wins + random.randint(200, 5000)
-        wr     = round((wins / games) * 100, 1)
-        kills  = random.randint(500, 25000)
-        rank   = random.choice(FF_RANKS)
-        level  = random.randint(40, 80)
-        cs_rank = random.choice(FF_RANKS)
+        if not FF_API_KEY:
+            await interaction.followup.send(
+                "⚠️ FF_API_KEY not configured. Add it to `.env` — get a free key at https://www.hlgamingofficial.com/p/api.html",
+                ephemeral=True,
+            )
+            return
+
+        data = await fetch_ff_player(uid, region)
+        if not data or "result" not in data:
+            await interaction.followup.send("❌ Player not found. Check the UID and region.", ephemeral=True)
+            return
+
+        result  = data["result"]
+        info    = result.get("AccountInfo", {})
+        social  = result.get("socialinfo", {})
+        guild   = result.get("GuildInfo", {})
+
+        name        = info.get("AccountName", "Unknown")
+        level       = info.get("AccountLevel", "?")
+        likes       = fmt_num(info.get("AccountLikes", 0))
+        br_points   = info.get("BrRankPoint", 0)
+        cs_points   = info.get("CsRankPoint", 0)
+        br_max      = info.get("BrMaxRank", 0)
+        br_rank     = br_rank_name(br_points)
+        cs_rank     = br_rank_name(cs_points)
+        region_code = info.get("AccountRegion", region).upper()
+        version     = info.get("ReleaseVersion", "?")
+        language    = social.get("AccountLanguage", "?").replace("Language_", "")
+        pref_mode   = social.get("AccountPreferMode", "?").replace("Prefermode_", "").upper()
+        signature   = social.get("AccountSignature", "")
+        guild_name  = guild.get("GuildName", "No Guild")
+        guild_level = guild.get("GuildLevel", "?")
+        guild_members = guild.get("GuildMember", "?")
+
+        color = RANK_COLORS.get(br_rank, 0xFF4500)
 
         embed = discord.Embed(
-            title=f"📊 {username} — Free Fire Stats",
-            color=RANK_COLORS.get(rank, 0xFF4500),
+            title=f"📊 {name}",
+            description=f"*{signature}*" if signature else "",
+            color=color,
             timestamp=datetime.utcnow(),
         )
-        embed.set_thumbnail(url=RANK_IMAGES.get(rank, "https://i.imgur.com/8QfKFqA.png"))
-        embed.add_field(name="🌍 Region",      value=region.upper(), inline=True)
-        embed.add_field(name="⭐ Level",        value=str(level),     inline=True)
-        embed.add_field(name="🏅 BR Rank",      value=rank,           inline=True)
-        embed.add_field(name="🎯 Clash Squad",  value=cs_rank,        inline=True)
-        embed.add_field(name="💀 K/D Ratio",    value=str(kd),        inline=True)
-        embed.add_field(name="🏆 Win Rate",     value=f"{wr}%",       inline=True)
-        embed.add_field(name="🔫 Total Kills",  value=f"{kills:,}",   inline=True)
-        embed.add_field(name="🎮 Games Played", value=f"{games:,}",   inline=True)
-        embed.add_field(name="🥇 Total Wins",   value=f"{wins:,}",    inline=True)
-        embed.set_footer(
-            text="⚠️ Stats are simulated — connect a real API for live data",
-            icon_url=interaction.user.display_avatar.url,
+        embed.set_thumbnail(url=RANK_IMAGES.get(br_rank, "https://i.imgur.com/8QfKFqA.png"))
+        embed.add_field(name="🌍 Region",        value=region_code,                    inline=True)
+        embed.add_field(name="⭐ Level",          value=str(level),                     inline=True)
+        embed.add_field(name="❤️ Likes",          value=likes,                          inline=True)
+        embed.add_field(name="🏅 BR Rank",        value=f"{br_rank} ({fmt_num(br_points)} pts)", inline=True)
+        embed.add_field(name="⚔️ CS Rank",        value=f"{cs_rank} ({fmt_num(cs_points)} pts)", inline=True)
+        embed.add_field(name="🏆 Peak BR Rank",   value=br_rank_name(br_max),           inline=True)
+        embed.add_field(name="🎮 Preferred Mode", value=pref_mode,                      inline=True)
+        embed.add_field(name="🌐 Language",       value=language,                       inline=True)
+        embed.add_field(name="📦 Version",        value=version,                        inline=True)
+        if guild_name != "No Guild":
+            embed.add_field(
+                name="🏰 Guild",
+                value=f"{guild_name} (Lvl {guild_level} • {guild_members} members)",
+                inline=False,
+            )
+        embed.set_footer(text=f"UID: {uid} • Data via HL Gaming Official API")
+        await interaction.followup.send(embed=embed)
+
+        # Also try to fetch game stats
+        stats_data = await fetch_ff_stats(uid, region)
+        if stats_data and "result" in stats_data:
+            ps = stats_data["result"].get("playerStats", {})
+            squad = ps.get("quadstats", {})
+            duo   = ps.get("duostats", {})
+            solo  = ps.get("solostats", {})
+
+            def stat_line(mode_data: dict) -> str:
+                if not mode_data:
+                    return "No data"
+                g = mode_data.get("gamesplayed", 0)
+                w = mode_data.get("wins", 0)
+                k = mode_data.get("kills", 0)
+                wr = round((w / g * 100), 1) if g else 0
+                kd = round(k / max((g - w), 1), 2)
+                return f"Games: {fmt_num(g)} | Wins: {fmt_num(w)} ({wr}%) | Kills: {fmt_num(k)} | K/D: {kd}"
+
+            stats_embed = discord.Embed(
+                title=f"🎮 {name} — Game Stats",
+                color=color,
+                timestamp=datetime.utcnow(),
+            )
+            stats_embed.add_field(name="👤 Solo",  value=stat_line(solo),  inline=False)
+            stats_embed.add_field(name="👥 Duo",   value=stat_line(duo),   inline=False)
+            stats_embed.add_field(name="👨‍👩‍👧‍👦 Squad", value=stat_line(squad), inline=False)
+
+            if squad:
+                d = squad.get("detailedstats", {})
+                hs    = d.get("headshotkills", 0)
+                total = squad.get("kills", 1)
+                hs_pct = round((hs / total * 100), 1) if total else 0
+                stats_embed.add_field(name="🎯 Headshot %", value=f"{hs_pct}%",                             inline=True)
+                stats_embed.add_field(name="💥 Most Kills", value=fmt_num(d.get("highestkills", 0)),         inline=True)
+                stats_embed.add_field(name="🤝 Revives",    value=fmt_num(d.get("revives", 0)),              inline=True)
+
+            stats_embed.set_footer(text=f"UID: {uid} • Data via HL Gaming Official API")
+            await interaction.followup.send(embed=stats_embed)
+
+    # ── /ffuid — look up player by UID only ───────────────
+    @app_commands.command(name="ffuid", description="Quick lookup of a Free Fire player by UID 🔎")
+    @app_commands.describe(uid="Free Fire UID", region="Region code (default: sg)")
+    async def slash_ffuid(self, interaction: discord.Interaction, uid: str, region: str = "sg"):
+        await interaction.response.defer()
+        if not FF_API_KEY:
+            await interaction.followup.send("⚠️ FF_API_KEY not set in .env", ephemeral=True)
+            return
+
+        data = await fetch_ff_player(uid, region)
+        if not data or "result" not in data:
+            await interaction.followup.send("❌ Player not found.", ephemeral=True)
+            return
+
+        info  = data["result"].get("AccountInfo", {})
+        guild = data["result"].get("GuildInfo", {})
+        name  = info.get("AccountName", "Unknown")
+        level = info.get("AccountLevel", "?")
+        br_r  = br_rank_name(info.get("BrRankPoint", 0))
+        likes = fmt_num(info.get("AccountLikes", 0))
+
+        embed = discord.Embed(
+            title=f"🔎 {name}",
+            color=RANK_COLORS.get(br_r, 0xFF4500),
+            timestamp=datetime.utcnow(),
         )
+        embed.set_thumbnail(url=RANK_IMAGES.get(br_r, ""))
+        embed.add_field(name="🆔 UID",    value=uid,                                      inline=True)
+        embed.add_field(name="⭐ Level",  value=str(level),                               inline=True)
+        embed.add_field(name="🏅 Rank",   value=br_r,                                     inline=True)
+        embed.add_field(name="❤️ Likes",  value=likes,                                    inline=True)
+        embed.add_field(name="🌍 Region", value=info.get("AccountRegion", region).upper(), inline=True)
+        if guild.get("GuildName"):
+            embed.add_field(name="🏰 Guild", value=guild["GuildName"], inline=True)
+        embed.set_footer(text="Data via HL Gaming Official API")
         await interaction.followup.send(embed=embed)
 
     # ── /rank ─────────────────────────────────────────────
@@ -113,16 +281,14 @@ class PlayerCog(commands.Cog, name="Player"):
         app_commands.Choice(name="💎 Heroic",      value="Heroic"),
     ])
     async def slash_rank(self, interaction: discord.Interaction, rank: str):
-        guild = interaction.guild
+        guild  = interaction.guild
         member = interaction.user
 
-        # Remove existing rank roles
         rank_role_names = list(RANK_ROLE_MAP.values())
         roles_to_remove = [r for r in member.roles if r.name in rank_role_names]
         if roles_to_remove:
             await member.remove_roles(*roles_to_remove, reason="Rank update")
 
-        # Add new rank role
         target_role_name = RANK_ROLE_MAP.get(rank)
         target_role = discord.utils.get(guild.roles, name=target_role_name)
 
@@ -138,17 +304,17 @@ class PlayerCog(commands.Cog, name="Player"):
             await interaction.response.send_message(embed=embed)
         else:
             await interaction.response.send_message(
-                f"⚠️ Role `{target_role_name}` not found. Run the setup script first.",
+                f"⚠️ Role `{target_role_name}` not found. Ask an admin to create it.",
                 ephemeral=True,
             )
 
     # ── /lfg ──────────────────────────────────────────────
     @app_commands.command(name="lfg", description="Looking for group — find squadmates 🔍")
     @app_commands.describe(
-        mode="Game mode you want to play",
+        mode="Game mode",
         rank="Your rank",
-        slots="How many players you need (1–3)",
-        note="Any extra info (mic required, region, etc.)"
+        slots="Players needed (1–3)",
+        note="Extra info (mic, region, etc.)"
     )
     @app_commands.choices(mode=[
         app_commands.Choice(name="Battle Royale",  value="Battle Royale"),
@@ -166,36 +332,24 @@ class PlayerCog(commands.Cog, name="Player"):
         note: str = "",
     ):
         slots = max(1, min(slots, 3))
-        embed = discord.Embed(
-            title="🔍 Looking for Group!",
-            color=0x00FF7F,
-            timestamp=datetime.utcnow(),
-        )
-        embed.set_author(
-            name=interaction.user.display_name,
-            icon_url=interaction.user.display_avatar.url,
-        )
-        embed.add_field(name="🎮 Mode",    value=mode,         inline=True)
-        embed.add_field(name="🏅 Rank",    value=rank,         inline=True)
-        embed.add_field(name="👥 Slots",   value=f"{slots}/3", inline=True)
+        embed = discord.Embed(title="🔍 Looking for Group!", color=0x00FF7F, timestamp=datetime.utcnow())
+        embed.set_author(name=interaction.user.display_name, icon_url=interaction.user.display_avatar.url)
+        embed.add_field(name="🎮 Mode",  value=mode,         inline=True)
+        embed.add_field(name="🏅 Rank",  value=rank,         inline=True)
+        embed.add_field(name="👥 Slots", value=f"{slots}/3", inline=True)
         if note:
             embed.add_field(name="📝 Note", value=note, inline=False)
         embed.set_footer(text="React ✅ to join • DM the player above")
-        msg = await interaction.response.send_message(embed=embed)
-        # Add join reaction
+        await interaction.response.send_message(embed=embed)
         sent = await interaction.original_response()
         await sent.add_reaction("✅")
 
     # ── /profile ──────────────────────────────────────────
     @app_commands.command(name="profile", description="View a member's server profile 👤")
     @app_commands.describe(member="The member to view (leave blank for yourself)")
-    async def slash_profile(
-        self,
-        interaction: discord.Interaction,
-        member: discord.Member = None,
-    ):
+    async def slash_profile(self, interaction: discord.Interaction, member: discord.Member = None):
         target = member or interaction.user
-        roles = [r.mention for r in target.roles if r.name != "@everyone"]
+        roles  = [r.mention for r in target.roles if r.name != "@everyone"]
 
         embed = discord.Embed(
             title=f"👤 {target.display_name}",
@@ -203,12 +357,12 @@ class PlayerCog(commands.Cog, name="Player"):
             timestamp=datetime.utcnow(),
         )
         embed.set_thumbnail(url=target.display_avatar.url)
-        embed.add_field(name="📛 Username",   value=str(target),                          inline=True)
-        embed.add_field(name="🆔 ID",         value=str(target.id),                       inline=True)
-        embed.add_field(name="📅 Joined",     value=target.joined_at.strftime("%b %d, %Y") if target.joined_at else "Unknown", inline=True)
-        embed.add_field(name="🎂 Account",    value=target.created_at.strftime("%b %d, %Y"), inline=True)
-        embed.add_field(name="🎭 Roles",      value=" ".join(roles[-5:]) if roles else "None", inline=False)
-        embed.set_footer(text="Free Fire Squad Server")
+        embed.add_field(name="📛 Username", value=str(target),                                            inline=True)
+        embed.add_field(name="🆔 ID",       value=str(target.id),                                         inline=True)
+        embed.add_field(name="📅 Joined",   value=target.joined_at.strftime("%b %d, %Y") if target.joined_at else "?", inline=True)
+        embed.add_field(name="🎂 Account",  value=target.created_at.strftime("%b %d, %Y"),                inline=True)
+        embed.add_field(name="🎭 Roles",    value=" ".join(roles[-5:]) if roles else "None",               inline=False)
+        embed.set_footer(text="PIRATES Free Fire Server")
         await interaction.response.send_message(embed=embed)
 
 
