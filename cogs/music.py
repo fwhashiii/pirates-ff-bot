@@ -49,9 +49,8 @@ def search_youtube(query: str) -> dict | None:
         return any(kw in t for kw in ALTERED_KEYWORDS)
 
     def pick_best(entries: list) -> dict | None:
-        """Pick the first non-altered entry, fall back to first if all altered."""
-        clean = [e for e in entries if e and not is_altered(e.get("title", ""))]
-        return (clean or [e for e in entries if e] or [None])[0]
+        """Pick the first valid entry."""
+        return (entries or [None])[0]
 
     searches = [
         # YouTube android — search top 5 and pick best
