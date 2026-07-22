@@ -60,6 +60,7 @@ COGS = [
     "cogs.antiraid",
     "cogs.growth",
     "cogs.limited_vc",
+    "cogs.player_enhanced",
 ]
 
 
