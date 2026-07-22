@@ -25,9 +25,31 @@ COOKIE_FILE = next((p for p in _COOKIE_PATHS if os.path.exists(p)), None)
 
 
 def search_youtube(query: str) -> dict | None:
-    """Search SoundCloud first, then YouTube. Returns stream URL."""
+    """Search SoundCloud first, then YouTube. Returns stream URL.
+    Filters out sped up, slowed, reverb, nightcore and other altered versions.
+    """
+
+    # Keywords that indicate an altered/unofficial version
+    ALTERED_KEYWORDS = [
+        "sped up", "speed up", "spedup", "nightcore", "slowed",
+        "reverb", "slowed + reverb", "slowed reverb", "pitched up",
+        "pitched down", "bass boosted", "8d audio", "432hz", "528hz",
+        "lofi", "lo-fi", "remix", "cover", "karaoke", "instrumental",
+        "lyrics video", "fan made", "fan-made",
+    ]
+
+    def is_altered(title: str) -> bool:
+        """Return True if the title suggests an altered version."""
+        t = title.lower()
+        return any(kw in t for kw in ALTERED_KEYWORDS)
+
+    def pick_best(entries: list) -> dict | None:
+        """Pick the first non-altered entry, fall back to first if all altered."""
+        clean = [e for e in entries if e and not is_altered(e.get("title", ""))]
+        return (clean or [e for e in entries if e] or [None])[0]
+
     searches = [
-        # SoundCloud — no bot detection
+        # SoundCloud — no bot detection, search top 5 and pick best
         {
             "format": "bestaudio/best",
             "noplaylist": True,
@@ -35,9 +57,9 @@ def search_youtube(query: str) -> dict | None:
             "no_warnings": True,
             "source_address": "0.0.0.0",
             "socket_timeout": 30,
-            "_query": f"scsearch1:{query}" if not query.startswith("http") else query,
+            "_query": f"scsearch5:{query}" if not query.startswith("http") else query,
         },
-        # YouTube android
+        # YouTube android — search top 5 and pick best
         {
             "format": "bestaudio/best",
             "noplaylist": True,
@@ -47,7 +69,7 @@ def search_youtube(query: str) -> dict | None:
             "extractor_args": {"youtube": {"player_client": ["android"]}},
             "http_headers": {"User-Agent": "com.google.android.youtube/17.36.4 (Linux; U; Android 12; GB) gzip"},
             "socket_timeout": 30,
-            "_query": f"ytsearch1:{query}" if not query.startswith("http") else query,
+            "_query": f"ytsearch5:{query}" if not query.startswith("http") else query,
         },
     ]
 
@@ -63,11 +85,24 @@ def search_youtube(query: str) -> dict | None:
                 info = ydl.extract_info(q, download=False)
                 if not info:
                     continue
-                if "entries" in info:
+
+                # Direct URL (not a search result)
+                if query.startswith("http"):
+                    entries = [info]
+                elif "entries" in info:
                     entries = [e for e in info["entries"] if e]
-                    if not entries:
-                        continue
-                    info = entries[0]
+                else:
+                    entries = [info]
+
+                if not entries:
+                    continue
+
+                info = pick_best(entries)
+                if not info:
+                    continue
+
+                if is_altered(info.get("title", "")):
+                    log.info(f"All results altered for query '{query}', using best available")
 
                 url = info.get("url")
                 if not url:
@@ -81,13 +116,13 @@ def search_youtube(query: str) -> dict | None:
                 source = "SoundCloud" if "soundcloud" in info.get("webpage_url", "") else "YouTube"
                 log.info(f"[{source}] Found: {info.get('title', '')[:60]}")
                 return {
-                    "url":      url,
-                    "title":    info.get("title", "Unknown"),
-                    "duration": info.get("duration", 0) or 0,
-                    "webpage":  info.get("webpage_url", ""),
+                    "url":       url,
+                    "title":     info.get("title", "Unknown"),
+                    "duration":  info.get("duration", 0) or 0,
+                    "webpage":   info.get("webpage_url", ""),
                     "thumbnail": info.get("thumbnail", ""),
-                    "uploader": info.get("uploader", "Unknown"),
-                    "source":   source,
+                    "uploader":  info.get("uploader", "Unknown"),
+                    "source":    source,
                 }
         except Exception as e:
             last_error = str(e)
