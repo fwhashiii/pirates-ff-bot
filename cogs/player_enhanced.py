@@ -129,7 +129,7 @@ class PlayerEnhancedCog(commands.Cog, name="PlayerEnhanced"):
     @app_commands.command(name="detailed", description="Detailed Free Fire account breakdown 📊")
     @app_commands.describe(uid="Free Fire UID", region="Region")
     async def slash_detailed(self, interaction: discord.Interaction, uid: str, region: str = "sg"):
-        await interaction.response.defer()
+        await interaction.response.defer(thinking=True)
         if not FF_API_KEY:
             await interaction.followup.send("⚠️ API not configured", ephemeral=True)
             return
@@ -203,7 +203,7 @@ class PlayerEnhancedCog(commands.Cog, name="PlayerEnhanced"):
         region="Region (same for both)"
     )
     async def slash_compare(self, interaction: discord.Interaction, uid1: str, uid2: str, region: str = "sg"):
-        await interaction.response.defer()
+        await interaction.response.defer(thinking=True)
         if not FF_API_KEY:
             await interaction.followup.send("⚠️ API not configured", ephemeral=True)
             return
@@ -258,7 +258,7 @@ class PlayerEnhancedCog(commands.Cog, name="PlayerEnhanced"):
     @app_commands.command(name="guild", description="Look up Free Fire guild info 🏰")
     @app_commands.describe(captain_uid="Guild captain's UID", region="Region")
     async def slash_guild(self, interaction: discord.Interaction, captain_uid: str, region: str = "sg"):
-        await interaction.response.defer()
+        await interaction.response.defer(thinking=True)
         if not FF_API_KEY:
             await interaction.followup.send("⚠️ API not configured", ephemeral=True)
             return
