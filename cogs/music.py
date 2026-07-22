@@ -18,7 +18,7 @@ FFMPEG_PATH = os.environ.get("FFMPEG_PATH", "ffmpeg")
 
 # ── Cookie file ───────────────────────────────────────────
 _COOKIE_PATHS = [
-    "/root/bot/youtube_cookies.txt",
+    "/root/pirates-ff-bot/youtube_cookies.txt",
     os.path.join(os.path.dirname(__file__), "..", "youtube_cookies.txt"),
 ]
 COOKIE_FILE = next((p for p in _COOKIE_PATHS if os.path.exists(p)), None)
