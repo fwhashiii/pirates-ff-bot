@@ -129,7 +129,9 @@ class PlayerEnhancedCog(commands.Cog, name="PlayerEnhanced"):
     @app_commands.command(name="detailed", description="Detailed Free Fire account breakdown 📊")
     @app_commands.describe(uid="Free Fire UID", region="Region")
     async def slash_detailed(self, interaction: discord.Interaction, uid: str, region: str = "sg"):
-        await interaction.response.defer(thinking=True)
+        # Defer immediately to prevent timeout
+        await interaction.response.defer()
+        
         if not FF_API_KEY:
             await interaction.followup.send("⚠️ API not configured", ephemeral=True)
             return
@@ -144,12 +146,27 @@ class PlayerEnhancedCog(commands.Cog, name="PlayerEnhanced"):
         credit = result.get("creditScoreInfo", {})
         pet = result.get("petInfo", {})
         guild = result.get("GuildInfo", {})
+        
+        # Debug logging
+        log.info(f"Detailed stats for {uid}: AccountCreateTime={info.get('AccountCreateTime')}, AccountLastLogin={info.get('AccountLastLogin')}")
 
         name = info.get("AccountName", "Unknown")
         br_points = info.get("BrRankPoint", 0)
         br_rank = br_rank_name(br_points)
-        created = int(info.get("AccountCreateTime", 0)) if info.get("AccountCreateTime") else 0
-        last_login = int(info.get("AccountLastLogin", 0)) if info.get("AccountLastLogin") else 0
+        
+        # Parse timestamps safely
+        try:
+            created_raw = info.get("AccountCreateTime")
+            created = int(created_raw) if created_raw and str(created_raw).strip() else 0
+        except (ValueError, TypeError):
+            created = 0
+            
+        try:
+            last_login_raw = info.get("AccountLastLogin")
+            last_login = int(last_login_raw) if last_login_raw and str(last_login_raw).strip() else 0
+        except (ValueError, TypeError):
+            last_login = 0
+            
         credit_score = credit.get("creditScore", 0)
         pet_level = pet.get("level", 0)
         pet_id = pet.get("id", 0)
@@ -175,14 +192,16 @@ class PlayerEnhancedCog(commands.Cog, name="PlayerEnhanced"):
         if pet_level:
             embed.add_field(name="🐾 Pet", value=f"Level {pet_level}", inline=True)
 
-        # Account Age & Last Seen
-        if created and created > 0:
+        # Account Age & Last Seen - only show if valid timestamps exist
+        if created > 0:
             account_age = days_since(created)
-            embed.add_field(name="📅 Account Age", value=account_age, inline=True)
+            if account_age != "Unknown":
+                embed.add_field(name="📅 Account Age", value=account_age, inline=True)
         
-        if last_login and last_login > 0:
+        if last_login > 0:
             last_seen = days_since(last_login)
-            embed.add_field(name="🕐 Last Seen", value=last_seen, inline=True)
+            if last_seen != "Unknown":
+                embed.add_field(name="🕐 Last Seen", value=last_seen, inline=True)
 
         # Guild
         if guild.get("GuildName"):
@@ -203,7 +222,7 @@ class PlayerEnhancedCog(commands.Cog, name="PlayerEnhanced"):
         region="Region (same for both)"
     )
     async def slash_compare(self, interaction: discord.Interaction, uid1: str, uid2: str, region: str = "sg"):
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer()
         if not FF_API_KEY:
             await interaction.followup.send("⚠️ API not configured", ephemeral=True)
             return
@@ -258,7 +277,7 @@ class PlayerEnhancedCog(commands.Cog, name="PlayerEnhanced"):
     @app_commands.command(name="guild", description="Look up Free Fire guild info 🏰")
     @app_commands.describe(captain_uid="Guild captain's UID", region="Region")
     async def slash_guild(self, interaction: discord.Interaction, captain_uid: str, region: str = "sg"):
-        await interaction.response.defer(thinking=True)
+        await interaction.response.defer()
         if not FF_API_KEY:
             await interaction.followup.send("⚠️ API not configured", ephemeral=True)
             return
