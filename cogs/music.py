@@ -23,6 +23,11 @@ _COOKIE_PATHS = [
 ]
 COOKIE_FILE = next((p for p in _COOKIE_PATHS if os.path.exists(p)), None)
 
+if COOKIE_FILE:
+    log.info(f"Using cookie file: {COOKIE_FILE}")
+else:
+    log.warning("No YouTube cookie file found — some songs may fail")
+
 
 def search_youtube(query: str) -> dict | None:
     """Search SoundCloud first, then YouTube. Returns stream URL.
