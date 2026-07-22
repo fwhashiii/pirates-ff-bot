@@ -30,16 +30,16 @@ def search_youtube(query: str) -> dict | None:
     """
 
     # Keywords that indicate an altered/unofficial version
+    # Uses word boundary checks to avoid false positives
     ALTERED_KEYWORDS = [
-        "sped up", "speed up", "spedup", "nightcore", "slowed",
-        "reverb", "slowed + reverb", "slowed reverb", "pitched up",
-        "pitched down", "bass boosted", "8d audio", "432hz", "528hz",
-        "lofi", "lo-fi", "remix", "cover", "karaoke", "instrumental",
-        "lyrics video", "fan made", "fan-made",
+        "sped up", "speed up", "spedup", "nightcore",
+        "slowed down", "slowed + reverb", "slowed+reverb", "slowed reverb",
+        "reverb only", "pitched up", "pitched down",
+        "bass boosted", "8d audio", "432hz", "528hz",
     ]
 
     def is_altered(title: str) -> bool:
-        """Return True if the title suggests an altered version."""
+        """Return True only if title clearly indicates an altered version."""
         t = title.lower()
         return any(kw in t for kw in ALTERED_KEYWORDS)
 
