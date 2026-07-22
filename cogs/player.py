@@ -188,7 +188,7 @@ class PlayerCog(commands.Cog, name="Player"):
                 value=f"{guild_name} (Lvl {guild_level} • {guild_members} members)",
                 inline=False,
             )
-        embed.set_footer(text=f"UID: {uid} • Data via HL Gaming Official API")
+        embed.set_footer(text=f"UID: {uid}")
         await interaction.followup.send(embed=embed)
 
         # Also try to fetch game stats
@@ -227,7 +227,7 @@ class PlayerCog(commands.Cog, name="Player"):
                 stats_embed.add_field(name="💥 Most Kills", value=fmt_num(d.get("highestkills", 0)),         inline=True)
                 stats_embed.add_field(name="🤝 Revives",    value=fmt_num(d.get("revives", 0)),              inline=True)
 
-            stats_embed.set_footer(text=f"UID: {uid} • Data via HL Gaming Official API")
+            stats_embed.set_footer(text=f"UID: {uid}")
             await interaction.followup.send(embed=stats_embed)
 
     # ── /ffuid — look up player by UID only ───────────────
@@ -264,7 +264,7 @@ class PlayerCog(commands.Cog, name="Player"):
         embed.add_field(name="🌍 Region", value=info.get("AccountRegion", region).upper(), inline=True)
         if guild.get("GuildName"):
             embed.add_field(name="🏰 Guild", value=guild["GuildName"], inline=True)
-        embed.set_footer(text="Data via HL Gaming Official API")
+        embed.set_footer(text="PIRATES Free Fire Stats")
         await interaction.followup.send(embed=embed)
 
     # ── /rank ─────────────────────────────────────────────
