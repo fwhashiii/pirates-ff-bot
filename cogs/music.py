@@ -49,16 +49,6 @@ def search_youtube(query: str) -> dict | None:
         return (clean or [e for e in entries if e] or [None])[0]
 
     searches = [
-        # SoundCloud — no bot detection, search top 5 and pick best
-        {
-            "format": "bestaudio/best",
-            "noplaylist": True,
-            "quiet": True,
-            "no_warnings": True,
-            "source_address": "0.0.0.0",
-            "socket_timeout": 30,
-            "_query": f"scsearch5:{query}" if not query.startswith("http") else query,
-        },
         # YouTube android — search top 5 and pick best
         {
             "format": "bestaudio/best",
@@ -70,6 +60,16 @@ def search_youtube(query: str) -> dict | None:
             "http_headers": {"User-Agent": "com.google.android.youtube/17.36.4 (Linux; U; Android 12; GB) gzip"},
             "socket_timeout": 30,
             "_query": f"ytsearch5:{query}" if not query.startswith("http") else query,
+        },
+        # SoundCloud fallback — some songs only on SC
+        {
+            "format": "bestaudio/best",
+            "noplaylist": True,
+            "quiet": True,
+            "no_warnings": True,
+            "source_address": "0.0.0.0",
+            "socket_timeout": 30,
+            "_query": f"scsearch5:{query}" if not query.startswith("http") else query,
         },
     ]
 
@@ -126,7 +126,10 @@ def search_youtube(query: str) -> dict | None:
                 }
         except Exception as e:
             last_error = str(e)
-            log.warning(f"Strategy {i+1} failed: {last_error[:100]}")
+            if "drm" in last_error.lower() or "protected" in last_error.lower():
+                log.warning(f"Strategy {i+1} DRM blocked, trying next...")
+            else:
+                log.warning(f"Strategy {i+1} failed: {last_error[:100]}")
             continue
 
     log.error(f"All strategies failed. Last: {last_error}")
