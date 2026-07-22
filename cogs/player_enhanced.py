@@ -96,11 +96,26 @@ def fmt_num(n) -> str:
         return str(n)
 
 def days_since(timestamp: int) -> str:
-    """Convert unix timestamp to days ago."""
+    """Convert unix timestamp to readable time ago."""
     try:
+        if not timestamp or timestamp == 0:
+            return "Unknown"
         dt = datetime.fromtimestamp(timestamp)
         delta = datetime.now() - dt
-        return f"{delta.days} days ago"
+        
+        if delta.days > 365:
+            years = delta.days // 365
+            return f"{years} year{'s' if years > 1 else ''} ago"
+        elif delta.days > 30:
+            months = delta.days // 30
+            return f"{months} month{'s' if months > 1 else ''} ago"
+        elif delta.days > 0:
+            return f"{delta.days} day{'s' if delta.days > 1 else ''} ago"
+        elif delta.seconds > 3600:
+            hours = delta.seconds // 3600
+            return f"{hours} hour{'s' if hours > 1 else ''} ago"
+        else:
+            return "Recently"
     except Exception:
         return "Unknown"
 
@@ -160,11 +175,14 @@ class PlayerEnhancedCog(commands.Cog, name="PlayerEnhanced"):
         if pet_level:
             embed.add_field(name="🐾 Pet", value=f"Level {pet_level}", inline=True)
 
-        # Account Age
-        if created:
-            embed.add_field(name="📅 Account Age", value=days_since(created), inline=True)
-        if last_login:
-            embed.add_field(name="🕐 Last Seen", value=days_since(last_login), inline=True)
+        # Account Age & Last Seen
+        if created and created > 0:
+            account_age = days_since(created)
+            embed.add_field(name="📅 Account Age", value=account_age, inline=True)
+        
+        if last_login and last_login > 0:
+            last_seen = days_since(last_login)
+            embed.add_field(name="🕐 Last Seen", value=last_seen, inline=True)
 
         # Guild
         if guild.get("GuildName"):
