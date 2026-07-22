@@ -90,10 +90,8 @@ async def on_ready():
         )
     )
     try:
-        guild = discord.Object(id=int(os.getenv("DISCORD_GUILD_ID", 0)))
-        bot.tree.copy_global_to(guild=guild)
-        synced = await bot.tree.sync(guild=guild)
-        log.info(f"Synced {len(synced)} slash command(s) to guild instantly.")
+        synced = await bot.tree.sync()
+        log.info(f"Synced {len(synced)} slash command(s) globally.")
     except Exception as e:
         log.error(f"Failed to sync commands: {e}")
 
@@ -174,10 +172,8 @@ async def prefix_sync(ctx):
     if ctx.author.id != OWNER_ID:
         return
     try:
-        guild = discord.Object(id=int(os.getenv("DISCORD_GUILD_ID", 0)))
-        bot.tree.copy_global_to(guild=guild)
-        synced = await bot.tree.sync(guild=guild)
-        await ctx.send(f"✅ Synced {len(synced)} command(s) to guild.")
+        synced = await bot.tree.sync()
+        await ctx.send(f"✅ Synced {len(synced)} command(s) globally.")
         log.info(f"Manual sync: {len(synced)} commands synced by {ctx.author}")
     except Exception as e:
         await ctx.send(f"❌ Sync failed: {e}")
