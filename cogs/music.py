@@ -85,6 +85,8 @@ def search_youtube(query: str) -> dict | None:
     last_error = None
     for i, opts in enumerate(searches):
         q = opts.pop("_query")
+        source_name = "YouTube" if "youtube" in opts.get("http_headers", {}).get("User-Agent", "") else "SoundCloud"
+        log.info(f"Trying strategy {i+1}: {source_name} with query: {q[:50]}")
         try:
             with yt_dlp.YoutubeDL(opts) as ydl:
                 info = ydl.extract_info(q, download=False)
